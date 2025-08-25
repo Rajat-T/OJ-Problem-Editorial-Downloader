@@ -39,3 +39,12 @@ def test_pdf_generation_performance(tmp_path, monkeypatch):
     creator.create_problem_pdf(SAMPLE_PROBLEM, filename='perf.pdf')
     duration = time.perf_counter() - start
     assert duration < 5.0
+
+
+def test_process_text_content_handles_single_newlines(tmp_path):
+    creator = PDFCreator(output_dir=str(tmp_path))
+    raw = 'Output\nthe\nanswers\nin\na\ntotal\nof\nQ\nlines.'
+    # By default single newlines are converted to spaces
+    assert creator._process_text_content(raw) == ['Output the answers in a total of Q lines.']
+    # When preserving lines they remain intact
+    assert creator._process_text_content(raw, preserve_lines=True) == [raw]
