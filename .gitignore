@@ -59,6 +59,11 @@ test_*.txt
 config.ini
 settings.json
 
+# Qwen CLI
+.qwen/
+.qwen-*
+qwen-session.json
+
 # Temporary files
 *.tmp
 *.bak

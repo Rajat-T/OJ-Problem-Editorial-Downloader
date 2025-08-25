@@ -15,7 +15,7 @@ Key features implemented:
 * Embedding of remote images with automatic caption handling.
 * Basic support for mathematical expressions using ``matplotlib``.
 * Automatic table of contents generation.
-* PDF metadata (source, url, scrape date …).
+* PDF metadata (source, url, scrape date ...).
 * Page headers and footers with page numbers.
 * Syntax highlighted code snippets via ``pygments``.
 * Table rendering for summaries, constraints and examples.
@@ -24,7 +24,7 @@ Key features implemented:
 
 The implementation relies solely on `reportlab` which is already a
 dependency of the project.  Optional rendering of mathematics requires
-``matplotlib`` – if it is not available the raw expression is inserted
+``matplotlib`` - if it is not available the raw expression is inserted
 as normal text so the resulting document still remains readable.
 """
 
@@ -47,6 +47,8 @@ from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     Image as RLImage,
     PageBreak,
@@ -131,9 +133,28 @@ class PDFCreator:
                 logger.warning(f"Font size {base_font_size} outside recommended range 6-24, using 11")
                 base_font_size = 11
             
+            # Try to register better fonts that support mathematical symbols
+            self._register_math_fonts()
+            
+            # Check if the requested font is available, fallback to a better one if not
             if not body_font or not isinstance(body_font, str):
-                logger.warning(f"Invalid body font '{body_font}', using Helvetica")
-                body_font = "Helvetica"
+                logger.warning(f"Invalid body font '{body_font}', using DejaVu")
+                body_font = "DejaVu"
+            
+            # Check if font is available, if not try to fallback to a better option
+            if body_font not in ("Helvetica", "Times-Roman", "Courier"):
+                # Try to use a font with better Unicode support
+                try:
+                    from reportlab.pdfbase.pdfmetrics import getRegisteredFontNames
+                    registered_fonts = getRegisteredFontNames()
+                    if body_font not in registered_fonts:
+                        # Try DejaVu which has better Unicode support
+                        if "DejaVu" in registered_fonts:
+                            body_font = "DejaVu"
+                        else:
+                            body_font = "Helvetica"  # Fallback to default
+                except:
+                    body_font = "Helvetica"  # Safe fallback
             
             self.base_font_size = base_font_size
             self.body_font = body_font
@@ -163,13 +184,51 @@ class PDFCreator:
             
             self._figure_counter = 0
             
-            logger.info(f"PDFCreator initialized successfully. Output: {self.output_dir}")
+            logger.info(f"PDFCreator initialized successfully. Output: {self.output_dir}, Font: {self.body_font}")
             
         except (FileSystemError, PDFGenerationError):
             raise
         except Exception as e:
             logger.error(f"Failed to initialize PDFCreator: {e}")
             raise PDFGenerationError(f"Initialization failed: {str(e)}", e)
+
+    # ------------------------------------------------------------------
+    # Font handling
+    # ------------------------------------------------------------------
+    
+    def _register_math_fonts(self) -> None:
+        """Register fonts with better Unicode and mathematical symbol support."""
+        try:
+            # Try to register DejaVu fonts which have excellent Unicode support
+            import reportlab.rl_config as rl_config
+            rl_config.TTFSearchPath.append('/usr/share/fonts/truetype/dejavu')
+            rl_config.TTFSearchPath.append('/usr/share/fonts/TTF')
+            rl_config.TTFSearchPath.append('/System/Library/Fonts')
+            rl_config.TTFSearchPath.append('/Library/Fonts')
+            
+            # Try common paths for DejaVu fonts
+            possible_paths = [
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                '/usr/share/fonts/TTF/DejaVuSans.ttf',
+                '/System/Library/Fonts/Arial Unicode.ttf',
+                '/Library/Fonts/Arial Unicode.ttf',
+                '/System/Library/Fonts/Helvetica.ttc',
+                '/Library/Fonts/Helvetica.ttc'
+            ]
+            
+            # Try to register DejaVu font if available
+            for font_path in possible_paths:
+                if os.path.exists(font_path):
+                    try:
+                        pdfmetrics.registerFont(TTFont('DejaVu', font_path))
+                        logger.info(f"Registered DejaVu font from {font_path}")
+                        break
+                    except Exception as e:
+                        logger.debug(f"Failed to register font from {font_path}: {e}")
+                        continue
+            
+        except Exception as e:
+            logger.debug(f"Font registration failed (not critical): {e}")
 
     # ------------------------------------------------------------------
     # Style setup
@@ -245,13 +304,18 @@ class PDFCreator:
             )
 
         # Add ProblemText style if it doesn't exist
+        # Use a font with better Unicode support for mathematical symbols
+        problem_font = self.body_font
+        if "DejaVu" in [self.body_font, "DejaVu"]:
+            problem_font = "DejaVu"
+        
         if "ProblemText" not in self.styles:
             self.styles.add(
                 ParagraphStyle(
                     name="ProblemText",
                     parent=self.styles["Normal"],
                     alignment=TA_JUSTIFY,
-                    fontName=self.body_font,
+                    fontName=problem_font,
                     fontSize=self.base_font_size,
                     leading=self.base_font_size + 3,
                     spaceAfter=6,
@@ -412,13 +476,33 @@ class PDFCreator:
 
         try:
             import matplotlib.pyplot as plt
+            import matplotlib.font_manager as fm
 
-            fig = plt.figure()
+            # Try to use a font with better mathematical symbol support
+            try:
+                # Try DejaVu Sans which has good Unicode support
+                plt.rcParams['font.family'] = 'DejaVu Sans'
+            except:
+                # Fallback to default
+                plt.rcParams['font.family'] = 'sans-serif'
+
+            fig = plt.figure(figsize=(len(expression) * 0.2, 0.5))  # Dynamic sizing
             fig.patch.set_alpha(0.0)
-            text = fig.text(0, 0, f"$${expression}$$", fontsize=12)
+            
+            # Use a larger font size for better clarity
+            text = fig.text(0.5, 0.5, f"${expression}$", fontsize=14, ha='center', va='center')
             plt.axis("off")
+            
+            # Create a buffer to save the image
             buffer = io.BytesIO()
-            fig.savefig(buffer, format="png", bbox_inches="tight", pad_inches=0.05, dpi=300)
+            
+            # Save with high DPI for better quality
+            fig.savefig(buffer, format="png", bbox_inches="tight", 
+                       pad_inches=0.1, dpi=300, 
+                       transparent=True,  # Transparent background
+                       facecolor='none',  # No face color
+                       edgecolor='none')  # No edge color
+            
             plt.close(fig)
             buffer.seek(0)
 
@@ -441,205 +525,208 @@ class PDFCreator:
         # Dictionary of LaTeX commands to Unicode symbols
         latex_to_unicode = {
             # Comparison operators
-            r'\\leq': '≤',
-            r'\\geq': '≥',
-            r'\\neq': '≠',
-            r'\\le': '≤',
-            r'\\ge': '≥',
-            r'\\ne': '≠',
-            r'\\approx': '≈',
-            r'\\equiv': '≡',
-            r'\\cong': '≅',
-            r'\\sim': '∼',
-            r'\\propto': '∝',
+            r'\leq': '≤',
+            r'\geq': '≥',
+            r'\neq': '≠',
+            r'\le': '≤',
+            r'\ge': '≥',
+            r'\ne': '≠',
+            r'\approx': '≈',
+            r'\equiv': '≡',
+            r'\cong': '≅',
+            r'\sim': '∼',
+            r'\propto': '∝',
             # Arithmetic symbols
-            r'\\times': '×',
-            r'\\div': '÷',
-            r'\\pm': '±',
-            r'\\mp': '∓',
-            r'\\cdot': '⋅',
-            r'\\bullet': '•',
-            r'\\ast': '∗',
-            r'\\star': '⋆',
-            r'\\oplus': '⊕',
-            r'\\ominus': '⊖',
-            r'\\otimes': '⊗',
-            r'\\oslash': '⊘',
+            r'\times': '×',
+            r'\div': '÷',
+            r'\pm': '±',
+            r'\mp': '∓',
+            r'\cdot': '⋅',
+            r'\bullet': '•',
+            r'\ast': '∗',
+            r'\star': '⋆',
+            r'\oplus': '⊕',
+            r'\ominus': '⊖',
+            r'\otimes': '⊗',
+            r'\oslash': '⊘',
             # Dots and ellipses
-            r'\\vdots': '⋮',
-            r'\\hdots': '⋯',
-            r'\\ddots': '⋱',
-            r'\\ldots': '…',
-            r'\\cdots': '⋯',
+            r'\vdots': '⋮',
+            r'\hdots': '⋯',
+            r'\ddots': '⋱',
+            r'\ldots': '...',
+            r'\cdots': '⋯',
             # Set theory symbols
-            r'\\cap': '∩',
-            r'\\cup': '∪',
-            r'\\subset': '⊂',
-            r'\\supset': '⊃',
-            r'\\subseteq': '⊆',
-            r'\\supseteq': '⊇',
-            r'\\subsetneq': '⊊',
-            r'\\supsetneq': '⊋',
-            r'\\in': '∈',
-            r'\\notin': '∉',
-            r'\\ni': '∋',
-            r'\\emptyset': '∅',
-            r'\\varnothing': '∅',
+            r'\cap': '∩',
+            r'\cup': '∪',
+            r'\subset': '⊂',
+            r'\supset': '⊃',
+            r'\subseteq': '⊆',
+            r'\supseteq': '⊇',
+            r'\subsetneq': '⊊',
+            r'\supsetneq': '⊋',
+            r'\in': '∈',
+            r'\notin': '∉',
+            r'\ni': '∋',
+            r'\emptyset': '∅',
+            r'\varnothing': '∅',
             # Mathematical symbols
-            r'\\infty': '∞',
-            r'\\partial': '∂',
-            r'\\nabla': '∇',
-            r'\\sum': '∑',
-            r'\\prod': '∏',
-            r'\\int': '∫',
-            r'\\oint': '∮',
-            r'\\sqrt': '√',
-            r'\\angle': '∠',
-            r'\\perp': '⊥',
-            r'\\parallel': '∥',
-            r'\\triangle': '△',
-            r'\\square': '□',
-            r'\\diamond': '⋄',
-            r'\\circ': '∘',
-            r'\\bigcirc': '○',
+            r'\infty': '∞',
+            r'\partial': '∂',
+            r'\nabla': '∇',
+            r'\sum': '∑',
+            r'\prod': '∏',
+            r'\int': '∫',
+            r'\oint': '∮',
+            r'\sqrt': '√',
+            r'\angle': '∠',
+            r'\perp': '⊥',
+            r'\parallel': '∥',
+            r'\triangle': '△',
+            r'\square': '□',
+            r'\diamond': '⋄',
+            r'\circ': '∘',
+            r'\bigcirc': '○',
             # Greek lowercase letters
-            r'\\alpha': 'α',
-            r'\\beta': 'β',
-            r'\\gamma': 'γ',
-            r'\\delta': 'δ',
-            r'\\epsilon': 'ε',
-            r'\\varepsilon': 'ε',
-            r'\\zeta': 'ζ',
-            r'\\eta': 'η',
-            r'\\theta': 'θ',
-            r'\\vartheta': 'ϑ',
-            r'\\iota': 'ι',
-            r'\\kappa': 'κ',
-            r'\\lambda': 'λ',
-            r'\\mu': 'μ',
-            r'\\nu': 'ν',
-            r'\\xi': 'ξ',
-            r'\\pi': 'π',
-            r'\\varpi': 'ϖ',
-            r'\\rho': 'ρ',
-            r'\\varrho': 'ϱ',
-            r'\\sigma': 'σ',
-            r'\\varsigma': 'ς',
-            r'\\tau': 'τ',
-            r'\\upsilon': 'υ',
-            r'\\phi': 'φ',
-            r'\\varphi': 'φ',
-            r'\\chi': 'χ',
-            r'\\psi': 'ψ',
-            r'\\omega': 'ω',
+            r'\alpha': 'α',
+            r'\beta': 'β',
+            r'\gamma': 'γ',
+            r'\delta': 'δ',
+            r'\epsilon': 'ε',
+            r'\varepsilon': 'ε',
+            r'\zeta': 'ζ',
+            r'\eta': 'η',
+            r'\theta': 'θ',
+            r'\vartheta': 'ϑ',
+            r'\iota': 'ι',
+            r'\kappa': 'κ',
+            r'\lambda': 'λ',
+            r'\mu': 'μ',
+            r'\nu': 'ν',
+            r'\xi': 'ξ',
+            r'\pi': 'π',
+            r'\varpi': 'ϖ',
+            r'\rho': 'ρ',
+            r'\varrho': 'ϱ',
+            r'\sigma': 'σ',
+            r'\varsigma': 'ς',
+            r'\tau': 'τ',
+            r'\upsilon': 'υ',
+            r'\phi': 'φ',
+            r'\varphi': 'φ',
+            r'\chi': 'χ',
+            r'\psi': 'ψ',
+            r'\omega': 'ω',
             # Greek uppercase letters
-            r'\\Alpha': 'Α',
-            r'\\Beta': 'Β',
-            r'\\Gamma': 'Γ',
-            r'\\Delta': 'Δ',
-            r'\\Epsilon': 'Ε',
-            r'\\Zeta': 'Ζ',
-            r'\\Eta': 'Η',
-            r'\\Theta': 'Θ',
-            r'\\Iota': 'Ι',
-            r'\\Kappa': 'Κ',
-            r'\\Lambda': 'Λ',
-            r'\\Mu': 'Μ',
-            r'\\Nu': 'Ν',
-            r'\\Xi': 'Ξ',
-            r'\\Pi': 'Π',
-            r'\\Rho': 'Ρ',
-            r'\\Sigma': 'Σ',
-            r'\\Tau': 'Τ',
-            r'\\Upsilon': 'Υ',
-            r'\\Phi': 'Φ',
-            r'\\Chi': 'Χ',
-            r'\\Psi': 'Ψ',
-            r'\\Omega': 'Ω',
+            r'\Alpha': 'Α',
+            r'\Beta': 'Β',
+            r'\Gamma': 'Γ',
+            r'\Delta': 'Δ',
+            r'\Epsilon': 'Ε',
+            r'\Zeta': 'Ζ',
+            r'\Eta': 'Η',
+            r'\Theta': 'Θ',
+            r'\Iota': 'Ι',
+            r'\Kappa': 'Κ',
+            r'\Lambda': 'Λ',
+            r'\Mu': 'Μ',
+            r'\Nu': 'Ν',
+            r'\Xi': 'Ξ',
+            r'\Pi': 'Π',
+            r'\Rho': 'Ρ',
+            r'\Sigma': 'Σ',
+            r'\Tau': 'Τ',
+            r'\Upsilon': 'Υ',
+            r'\Phi': 'Φ',
+            r'\Chi': 'Χ',
+            r'\Psi': 'Ψ',
+            r'\Omega': 'Ω',
             # Arrows
-            r'\\rightarrow': '→',
-            r'\\to': '→',
-            r'\\leftarrow': '←',
-            r'\\gets': '←',
-            r'\\leftrightarrow': '↔',
-            r'\\uparrow': '↑',
-            r'\\downarrow': '↓',
-            r'\\updownarrow': '↕',
-            r'\\nearrow': '↗',
-            r'\\searrow': '↘',
-            r'\\swarrow': '↙',
-            r'\\nwarrow': '↖',
-            r'\\Rightarrow': '⇒',
-            r'\\Leftarrow': '⇐',
-            r'\\Leftrightarrow': '⇔',
-            r'\\Uparrow': '⇑',
-            r'\\Downarrow': '⇓',
-            r'\\Updownarrow': '⇕',
-            r'\\mapsto': '↦',
-            r'\\longmapsto': '⟼',
-            r'\\longrightarrow': '⟶',
-            r'\\longleftarrow': '⟵',
-            r'\\longleftrightarrow': '⟷',
+            r'\rightarrow': '→',
+            r'\to': '→',
+            r'\leftarrow': '←',
+            r'\gets': '←',
+            r'\leftrightarrow': '↔',
+            r'\uparrow': '↑',
+            r'\downarrow': '↓',
+            r'\updownarrow': '↕',
+            r'\nearrow': '↗',
+            r'\searrow': '↘',
+            r'\swarrow': '↙',
+            r'\nwarrow': '↖',
+            r'\Rightarrow': '⇒',
+            r'\Leftarrow': '⇐',
+            r'\Leftrightarrow': '⇔',
+            r'\Uparrow': '⇑',
+            r'\Downarrow': '⇓',
+            r'\Updownarrow': '⇕',
+            r'\mapsto': '↦',
+            r'\longmapsto': '⟼',
+            r'\longrightarrow': '⟶',
+            r'\longleftarrow': '⟵',
+            r'\longleftrightarrow': '⟷',
             # Logic symbols
-            r'\\land': '∧',
-            r'\\wedge': '∧',
-            r'\\lor': '∨',
-            r'\\vee': '∨',
-            r'\\lnot': '¬',
-            r'\\neg': '¬',
-            r'\\forall': '∀',
-            r'\\exists': '∃',
-            r'\\nexists': '∄',
-            r'\\top': '⊤',
-            r'\\bot': '⊥',
-            r'\\models': '⊨',
-            r'\\vdash': '⊢',
-            r'\\dashv': '⊣',
+            r'\land': '∧',
+            r'\wedge': '∧',
+            r'\lor': '∨',
+            r'\vee': '∨',
+            r'\lnot': '¬',
+            r'\neg': '¬',
+            r'\forall': '∀',
+            r'\exists': '∃',
+            r'\nexists': '∄',
+            r'\top': '⊤',
+            r'\bot': '⊥',
+            r'\models': '⊨',
+            r'\vdash': '⊢',
+            r'\dashv': '⊣',
             # Brackets and parentheses  
-            r'\\lfloor': '⌊',
-            r'\\rfloor': '⌋',
-            r'\\lceil': '⌈',
-            r'\\rceil': '⌉',
-            r'\\langle': '⟨',
-            r'\\rangle': '⟩',
-            r'\\llbracket': '⟦',
-            r'\\rrbracket': '⟧',
+            r'\lfloor': '⌊',
+            r'\rfloor': '⌋',
+            r'\lceil': '⌈',
+            r'\rceil': '⌉',
+            r'\langle': '⟨',
+            r'\rangle': '⟩',
+            r'\llbracket': '⟦',
+            r'\rrbracket': '⟧',
             # Miscellaneous symbols
-            r'\\mid': '∣',
-            r'\\parallel': '∥',
-            r'\\nmid': '∤',
-            r'\\nparallel': '∦',
-            r'\\hbar': 'ℏ',
-            r'\\ell': 'ℓ',
-            r'\\wp': '℘',
-            r'\\Re': 'ℜ',
-            r'\\Im': 'ℑ',
-            r'\\aleph': 'ℵ',
-            r'\\beth': 'ℶ',
-            r'\\gimel': 'ℷ',
-            r'\\daleth': 'ℸ',
-            r'\\clubsuit': '♣',
-            r'\\diamondsuit': '♢',
-            r'\\heartsuit': '♡',
-            r'\\spadesuit': '♠',
+            r'\mid': '∣',
+            r'\parallel': '∥',
+            r'\nmid': '∤',
+            r'\nparallel': '∦',
+            r'\hbar': 'ℏ',
+            r'\ell': 'ℓ',
+            r'\wp': '℘',
+            r'\Re': 'ℜ',
+            r'\Im': 'ℑ',
+            r'\aleph': 'ℵ',
+            r'\beth': 'ℶ',
+            r'\gimel': 'ℷ',
+            r'\daleth': 'ℸ',
+            r'\clubsuit': '♣',
+            r'\diamondsuit': '♢',
+            r'\heartsuit': '♡',
+            r'\spadesuit': '♠',
         }
         
         # Replace LaTeX commands with Unicode symbols
         for latex_cmd, unicode_char in latex_to_unicode.items():
-            text = re.sub(latex_cmd, unicode_char, text)
+            # Use word boundaries to avoid partial matches
+            # Escape special regex characters in the LaTeX command
+            escaped_cmd = re.escape(latex_cmd)
+            text = re.sub(r'(?<!\\)' + escaped_cmd, unicode_char, text)
         
         # Handle common mathematical formatting patterns
         # Convert subscripts and superscripts to more readable format
-        text = re.sub(r'([A-Za-z0-9])_\{([^}]+)\}', r'\1₍\2₎', text)  # A_{i} -> A₍i₎
-        text = re.sub(r'([A-Za-z0-9])_([A-Za-z0-9])', r'\1₍\2₎', text)  # A_i -> A₍i₎
-        text = re.sub(r'([A-Za-z0-9])\^\{([^}]+)\}', r'\1⁽\2⁾', text)  # A^{i} -> A⁽i⁾
-        text = re.sub(r'([A-Za-z0-9])\^([A-Za-z0-9])', r'\1⁽\2⁾', text)  # A^i -> A⁽i⁾
+        text = re.sub(r'([A-Za-z0-9])_\{([^}]+)\}', r'\1\2', text)  # A_{i} -> Ai (simpler for PDF)
+        text = re.sub(r'([A-Za-z0-9])_([A-Za-z0-9])', r'\1\2', text)  # A_i -> Ai (simpler for PDF)
+        text = re.sub(r'([A-Za-z0-9])\^\{([^}]+)\}', r'\1^\2', text)  # A^{i} -> A^i
+        text = re.sub(r'([A-Za-z0-9])\^([A-Za-z0-9])', r'\1^\2', text)  # A^i -> A^i
         
         # Clean up common LaTeX formatting issues
         text = re.sub(r'\\text\{([^}]+)\}', r'\1', text)  # \text{something} -> something
         text = re.sub(r'\\mathrm\{([^}]+)\}', r'\1', text)  # \mathrm{something} -> something
-        text = re.sub(r'\\textbf\{([^}]+)\}', r'**\1**', text)  # \textbf{something} -> **something**
-        text = re.sub(r'\\textit\{([^}]+)\}', r'*\1*', text)  # \textit{something} -> *something*
+        text = re.sub(r'\\textbf\{([^}]+)\}', r'\1', text)  # \textbf{something} -> something
+        text = re.sub(r'\\textit\{([^}]+)\}', r'\1', text)  # \textit{something} -> something
         
         # Handle fractions in a more readable way
         text = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1)/(\2)', text)  # \frac{a}{b} -> (a)/(b)
@@ -664,24 +751,42 @@ class PDFCreator:
         text = html.unescape(text)
         
         # Handle problematic Unicode characters that appear as black squares
+        # Extended list of problematic characters
         problematic_chars = {
-            '\u25A0': '_',  # Black Large Square → underscore
-            '\u25A1': '_',  # White Large Square → underscore 
-            '\u25AA': '_',  # Black Small Square → underscore
-            '\u25AB': '_',  # White Small Square → underscore
-            '\u2588': '_',  # Full Block → underscore
-            '\u2589': '_',  # Left Seven Eighths Block → underscore
-            '\u258A': '_',  # Left Three Quarters Block → underscore
-            '\u258B': '_',  # Left Five Eighths Block → underscore
-            '\u258C': '_',  # Left Half Block → underscore
-            '\u258D': '_',  # Left Three Eighths Block → underscore
-            '\u258E': '_',  # Left One Quarter Block → underscore
-            '\u258F': '_',  # Left One Eighth Block → underscore
-            '\u2590': '_',  # Right Half Block → underscore
-            '\u2591': '_',  # Light Shade → underscore
-            '\u2592': '_',  # Medium Shade → underscore
-            '\u2593': '_',  # Dark Shade → underscore
-            '\uFFFD': '_',  # Replacement Character → underscore
+            '\u25A0': ' ',  # Black Large Square
+            '\u25A1': ' ',  # White Large Square
+            '\u25AA': ' ',  # Black Small Square
+            '\u25AB': ' ',  # White Small Square
+            '\u2588': ' ',  # Full Block
+            '\u2589': ' ',  # Left Seven Eighths Block
+            '\u258A': ' ',  # Left Three Quarters Block
+            '\u258B': ' ',  # Left Five Eighths Block
+            '\u258C': ' ',  # Left Half Block
+            '\u258D': ' ',  # Left Three Eighths Block
+            '\u258E': ' ',  # Left One Quarter Block
+            '\u258F': ' ',  # Left One Eighth Block
+            '\u2590': ' ',  # Right Half Block
+            '\u2591': ' ',  # Light Shade
+            '\u2592': ' ',  # Medium Shade
+            '\u2593': ' ',  # Dark Shade
+            '\uFFFD': ' ',  # Replacement Character
+            '\u00A0': ' ',  # Non-breaking space
+            '\u2000': ' ',  # En quad
+            '\u2001': ' ',  # Em quad
+            '\u2002': ' ',  # En space
+            '\u2003': ' ',  # Em space
+            '\u2004': ' ',  # Three-per-em space
+            '\u2005': ' ',  # Four-per-em space
+            '\u2006': ' ',  # Six-per-em space
+            '\u2007': ' ',  # Figure space
+            '\u2008': ' ',  # Punctuation space
+            '\u2009': ' ',  # Thin space
+            '\u200A': ' ',  # Hair space
+            '\u2028': ' ',  # Line separator
+            '\u2029': ' ',  # Paragraph separator
+            '\u202F': ' ',  # Narrow no-break space
+            '\u205F': ' ',  # Medium mathematical space
+            '\u3000': ' ',  # Ideographic space
         }
         
         for char, replacement in problematic_chars.items():
@@ -701,8 +806,19 @@ class PDFCreator:
             '&rdquo;': '"',
             '&ldquo;': '"',
             '&mdash;': '—',
-            '&ndash;': '–',
-            '&hellip;': '…',
+            '&ndash;': '-',
+            '&hellip;': '...',
+            '&bull;': '•',
+            '&middot;': '·',
+            '&copy;': '©',
+            '&reg;': '®',
+            '&trade;': '™',
+            '&deg;': '°',
+            '&plusmn;': '±',
+            '&times;': '×',
+            '&divide;': '÷',
+            '&sup2;': '²',
+            '&sup3;': '³',
         }
         
         for entity, replacement in html_entities.items():
@@ -732,7 +848,7 @@ class PDFCreator:
         
         # Clean up leading/trailing underscores around spaces
         text = re.sub(r'_\s+', ' ', text)
-        text = re.sub(r'\s+_', ' ', text)
+        text = re.sub(r'\s+_+', ' ', text)
         
         # Fix common spacing issues
         text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
@@ -761,11 +877,11 @@ class PDFCreator:
     def _add_text_with_math(self, story: List[Any], text: str, style: ParagraphStyle) -> None:
         """Add text to the story while rendering math blocks.
 
-        The function looks for ``$...$`` patterns.  Pieces of plain text
+        The function looks for ``$...$`` or ``$$...$$`` patterns.  Pieces of plain text
         are appended as :class:`Paragraph` objects, while the expressions
         themselves are rendered using :func:`_render_math` and inserted as
         images.  This keeps the surrounding text searchable and
-        copy‑able whilst still allowing mathematical notation.
+        copy-able whilst still allowing mathematical notation.
         """
         
         # First convert LaTeX symbols to Unicode or proper format
@@ -774,23 +890,64 @@ class PDFCreator:
         # Improve spacing and formatting for better readability
         text = self._improve_text_formatting(text)
         
-        pattern = re.compile(r"(\$[^$]+\$)")
+        # Handle special cases for mathematical content in PDFs
+        # Replace problematic subscripts/superscripts with readable alternatives
+        # This helps with font rendering issues
+        text = re.sub(r'([A-Za-z])_(\d+)', r'\1[\2]', text)  # A_1 -> A[1]
+        text = re.sub(r'([A-Za-z])_([a-zA-Z])', r'\1[\2]', text)  # A_i -> A[i]
+        
+        pattern = re.compile(r"(\$\$?[^$]+\$\$?)")  # Match both $...$ and $$...$$
         parts = pattern.split(text)
         for part in parts:
             if not part:
                 continue
-            if part.startswith("$") and part.endswith("$"):
-                expr = part[1:-1]
+            if (part.startswith("$") and part.endswith("$")) or (part.startswith("$$") and part.endswith("$$")):
+                # Extract expression, handling both $...$ and $$...$$
+                if part.startswith("$$") and part.endswith("$$") and len(part) > 4:
+                    expr = part[2:-2]
+                elif part.startswith("$") and part.endswith("$") and len(part) > 2:
+                    expr = part[1:-1]
+                else:
+                    # Not a valid math expression, treat as regular text
+                    story.append(Paragraph(part, style))
+                    continue
+                    
+                # Try to render math expression
                 img_path = self._render_math(expr)
-                if img_path:
-                    story.append(RLImage(str(img_path), width=2 * inch))
+                if img_path and img_path.exists():
+                    try:
+                        # Get image dimensions for proper sizing
+                        with Image.open(img_path) as pil_img:
+                            width, height = pil_img.size
+                        
+                        # Scale image appropriately
+                        max_width = 4 * inch
+                        if width > max_width:
+                            scale = max_width / width
+                            display_width = max_width
+                            display_height = height * scale
+                        else:
+                            display_width = width
+                            display_height = height
+                            
+                        img = RLImage(str(img_path), width=display_width, height=display_height)
+                        img.hAlign = "CENTER"
+                        story.append(img)
+                    except Exception as e:
+                        logger.warning(f"Failed to add math image {img_path}: {e}")
+                        # Fallback to text if image handling fails
+                        story.append(Paragraph(f"[Math: {expr}]", style))
                 else:
                     # Fallback to text if math rendering fails
                     # Apply LaTeX symbol conversion to the expression as well
                     converted_expr = self._convert_latex_symbols(expr)
-                    story.append(Paragraph(converted_expr, style))
+                    story.append(Paragraph(f"[Math: {converted_expr}]", style))
             else:
-                story.append(Paragraph(part, style))
+                # Regular text - clean it up before adding
+                clean_text = self._convert_latex_symbols(part)
+                clean_text = self._improve_text_formatting(clean_text)
+                if clean_text.strip():
+                    story.append(Paragraph(clean_text, style))
 
     def _add_heading(
         self,
@@ -1207,7 +1364,7 @@ class PDFCreator:
             raise PDFGenerationError(f"Unexpected error: {str(e)}", e)
 
     # ------------------------------------------------------------------
-    # The following two helpers are light‑weight wrappers kept for API
+    # The following two helpers are light-weight wrappers kept for API
     # compatibility with the rest of the project.  They simply forward to
     # :meth:`create_problem_pdf` by merging the problem and editorial
     # sections into a single document.
@@ -1229,6 +1386,7 @@ class PDFCreator:
         filename: Optional[str] = None,
     ) -> str:
         """Create a single PDF containing both the problem and editorial."""
+        # Implementation here
 
         title = problem.get("title", "Problem")
         platform = problem.get("platform", "Unknown")
@@ -1299,4 +1457,3 @@ class PDFCreator:
 
 
 __all__ = ["PDFCreator"]
-
