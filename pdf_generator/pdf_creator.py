@@ -30,6 +30,7 @@ as normal text so the resulting document still remains readable.
 
 from __future__ import annotations
 
+import html
 import io
 import logging
 import os
@@ -439,65 +440,161 @@ class PDFCreator:
             
         # Dictionary of LaTeX commands to Unicode symbols
         latex_to_unicode = {
+            # Comparison operators
             r'\\leq': '≤',
             r'\\geq': '≥',
             r'\\neq': '≠',
+            r'\\le': '≤',
+            r'\\ge': '≥',
+            r'\\ne': '≠',
+            r'\\approx': '≈',
+            r'\\equiv': '≡',
+            r'\\cong': '≅',
+            r'\\sim': '∼',
+            r'\\propto': '∝',
+            # Arithmetic symbols
             r'\\times': '×',
             r'\\div': '÷',
             r'\\pm': '±',
             r'\\mp': '∓',
             r'\\cdot': '⋅',
             r'\\bullet': '•',
+            r'\\ast': '∗',
+            r'\\star': '⋆',
+            r'\\oplus': '⊕',
+            r'\\ominus': '⊖',
+            r'\\otimes': '⊗',
+            r'\\oslash': '⊘',
+            # Dots and ellipses
+            r'\\vdots': '⋮',
+            r'\\hdots': '⋯',
+            r'\\ddots': '⋱',
+            r'\\ldots': '…',
+            r'\\cdots': '⋯',
+            # Set theory symbols
             r'\\cap': '∩',
             r'\\cup': '∪',
             r'\\subset': '⊂',
             r'\\supset': '⊃',
             r'\\subseteq': '⊆',
             r'\\supseteq': '⊇',
+            r'\\subsetneq': '⊊',
+            r'\\supsetneq': '⊋',
             r'\\in': '∈',
             r'\\notin': '∉',
+            r'\\ni': '∋',
             r'\\emptyset': '∅',
+            r'\\varnothing': '∅',
+            # Mathematical symbols
             r'\\infty': '∞',
             r'\\partial': '∂',
             r'\\nabla': '∇',
             r'\\sum': '∑',
             r'\\prod': '∏',
             r'\\int': '∫',
+            r'\\oint': '∮',
             r'\\sqrt': '√',
+            r'\\angle': '∠',
+            r'\\perp': '⊥',
+            r'\\parallel': '∥',
+            r'\\triangle': '△',
+            r'\\square': '□',
+            r'\\diamond': '⋄',
+            r'\\circ': '∘',
+            r'\\bigcirc': '○',
+            # Greek lowercase letters
             r'\\alpha': 'α',
             r'\\beta': 'β',
             r'\\gamma': 'γ',
             r'\\delta': 'δ',
             r'\\epsilon': 'ε',
+            r'\\varepsilon': 'ε',
+            r'\\zeta': 'ζ',
+            r'\\eta': 'η',
             r'\\theta': 'θ',
+            r'\\vartheta': 'ϑ',
+            r'\\iota': 'ι',
+            r'\\kappa': 'κ',
             r'\\lambda': 'λ',
             r'\\mu': 'μ',
+            r'\\nu': 'ν',
+            r'\\xi': 'ξ',
             r'\\pi': 'π',
+            r'\\varpi': 'ϖ',
+            r'\\rho': 'ρ',
+            r'\\varrho': 'ϱ',
             r'\\sigma': 'σ',
+            r'\\varsigma': 'ς',
+            r'\\tau': 'τ',
+            r'\\upsilon': 'υ',
             r'\\phi': 'φ',
+            r'\\varphi': 'φ',
+            r'\\chi': 'χ',
+            r'\\psi': 'ψ',
             r'\\omega': 'ω',
-            r'\\Delta': 'Δ',
+            # Greek uppercase letters
+            r'\\Alpha': 'Α',
+            r'\\Beta': 'Β',
             r'\\Gamma': 'Γ',
-            r'\\Lambda': 'Λ',
-            r'\\Omega': 'Ω',
-            r'\\Phi': 'Φ',
-            r'\\Pi': 'Π',
-            r'\\Sigma': 'Σ',
+            r'\\Delta': 'Δ',
+            r'\\Epsilon': 'Ε',
+            r'\\Zeta': 'Ζ',
+            r'\\Eta': 'Η',
             r'\\Theta': 'Θ',
+            r'\\Iota': 'Ι',
+            r'\\Kappa': 'Κ',
+            r'\\Lambda': 'Λ',
+            r'\\Mu': 'Μ',
+            r'\\Nu': 'Ν',
+            r'\\Xi': 'Ξ',
+            r'\\Pi': 'Π',
+            r'\\Rho': 'Ρ',
+            r'\\Sigma': 'Σ',
+            r'\\Tau': 'Τ',
+            r'\\Upsilon': 'Υ',
+            r'\\Phi': 'Φ',
+            r'\\Chi': 'Χ',
+            r'\\Psi': 'Ψ',
+            r'\\Omega': 'Ω',
             # Arrows
             r'\\rightarrow': '→',
+            r'\\to': '→',
             r'\\leftarrow': '←',
+            r'\\gets': '←',
             r'\\leftrightarrow': '↔',
+            r'\\uparrow': '↑',
+            r'\\downarrow': '↓',
+            r'\\updownarrow': '↕',
+            r'\\nearrow': '↗',
+            r'\\searrow': '↘',
+            r'\\swarrow': '↙',
+            r'\\nwarrow': '↖',
             r'\\Rightarrow': '⇒',
             r'\\Leftarrow': '⇐',
             r'\\Leftrightarrow': '⇔',
+            r'\\Uparrow': '⇑',
+            r'\\Downarrow': '⇓',
+            r'\\Updownarrow': '⇕',
+            r'\\mapsto': '↦',
+            r'\\longmapsto': '⟼',
+            r'\\longrightarrow': '⟶',
+            r'\\longleftarrow': '⟵',
+            r'\\longleftrightarrow': '⟷',
             # Logic symbols
             r'\\land': '∧',
+            r'\\wedge': '∧',
             r'\\lor': '∨',
+            r'\\vee': '∨',
             r'\\lnot': '¬',
             r'\\neg': '¬',
             r'\\forall': '∀',
             r'\\exists': '∃',
+            r'\\nexists': '∄',
+            r'\\top': '⊤',
+            r'\\bot': '⊥',
+            r'\\models': '⊨',
+            r'\\vdash': '⊢',
+            r'\\dashv': '⊣',
             # Brackets and parentheses  
             r'\\lfloor': '⌊',
             r'\\rfloor': '⌋',
@@ -505,16 +602,109 @@ class PDFCreator:
             r'\\rceil': '⌉',
             r'\\langle': '⟨',
             r'\\rangle': '⟩',
+            r'\\llbracket': '⟦',
+            r'\\rrbracket': '⟧',
+            # Miscellaneous symbols
+            r'\\mid': '∣',
+            r'\\parallel': '∥',
+            r'\\nmid': '∤',
+            r'\\nparallel': '∦',
+            r'\\hbar': 'ℏ',
+            r'\\ell': 'ℓ',
+            r'\\wp': '℘',
+            r'\\Re': 'ℜ',
+            r'\\Im': 'ℑ',
+            r'\\aleph': 'ℵ',
+            r'\\beth': 'ℶ',
+            r'\\gimel': 'ℷ',
+            r'\\daleth': 'ℸ',
+            r'\\clubsuit': '♣',
+            r'\\diamondsuit': '♢',
+            r'\\heartsuit': '♡',
+            r'\\spadesuit': '♠',
         }
         
         # Replace LaTeX commands with Unicode symbols
         for latex_cmd, unicode_char in latex_to_unicode.items():
             text = re.sub(latex_cmd, unicode_char, text)
         
-        # Handle subscripts and superscripts in simple cases (but don't convert to Unicode)
-        # Instead, we'll keep them as text for better readability
-        text = re.sub(r'(\w+)_(\w+)', r'\1_\2', text)  # Keep subscripts as text
-        text = re.sub(r'(\w+)\^(\w+)', r'\1^\2', text)  # Keep superscripts as text
+        # Handle common mathematical formatting patterns
+        # Convert subscripts and superscripts to more readable format
+        text = re.sub(r'([A-Za-z0-9])_\{([^}]+)\}', r'\1₍\2₎', text)  # A_{i} -> A₍i₎
+        text = re.sub(r'([A-Za-z0-9])_([A-Za-z0-9])', r'\1₍\2₎', text)  # A_i -> A₍i₎
+        text = re.sub(r'([A-Za-z0-9])\^\{([^}]+)\}', r'\1⁽\2⁾', text)  # A^{i} -> A⁽i⁾
+        text = re.sub(r'([A-Za-z0-9])\^([A-Za-z0-9])', r'\1⁽\2⁾', text)  # A^i -> A⁽i⁾
+        
+        # Clean up common LaTeX formatting issues
+        text = re.sub(r'\\text\{([^}]+)\}', r'\1', text)  # \text{something} -> something
+        text = re.sub(r'\\mathrm\{([^}]+)\}', r'\1', text)  # \mathrm{something} -> something
+        text = re.sub(r'\\textbf\{([^}]+)\}', r'**\1**', text)  # \textbf{something} -> **something**
+        text = re.sub(r'\\textit\{([^}]+)\}', r'*\1*', text)  # \textit{something} -> *something*
+        
+        # Handle fractions in a more readable way
+        text = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1)/(\2)', text)  # \frac{a}{b} -> (a)/(b)
+        
+        # Handle common spacing commands
+        text = re.sub(r'\\,', ' ', text)  # thin space
+        text = re.sub(r'\\;', '  ', text)  # medium space
+        text = re.sub(r'\\quad', '    ', text)  # quad space
+        text = re.sub(r'\\qquad', '        ', text)  # double quad space
+        
+        # Clean up remaining backslashes from LaTeX commands
+        text = re.sub(r'\\([a-zA-Z]+)', r'\1', text)  # Remove backslash from unrecognized commands
+        
+        return text
+
+    def _improve_text_formatting(self, text: str) -> str:
+        """Improve text formatting for better readability in PDFs."""
+        if not text:
+            return text
+        
+        # Decode HTML entities first
+        text = html.unescape(text)
+        
+        # Handle common HTML/XML entities that might not be decoded
+        html_entities = {
+            '&nbsp;': ' ',
+            '&amp;': '&',
+            '&lt;': '<',
+            '&gt;': '>',
+            '&quot;': '"',
+            '&apos;': "'",
+            '&#39;': "'",
+            '&rsquo;': "'",
+            '&lsquo;': "'",
+            '&rdquo;': '"',
+            '&ldquo;': '"',
+            '&mdash;': '—',
+            '&ndash;': '–',
+            '&hellip;': '…',
+        }
+        
+        for entity, replacement in html_entities.items():
+            text = text.replace(entity, replacement)
+            
+        # Fix common spacing issues
+        text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+        text = re.sub(r'\s*,\s*', ', ', text)  # Fix comma spacing
+        text = re.sub(r'\s*\.\s*', '. ', text)  # Fix period spacing
+        text = re.sub(r'\s*;\s*', '; ', text)  # Fix semicolon spacing
+        text = re.sub(r'\s*:\s*', ': ', text)  # Fix colon spacing
+        
+        # Improve parentheses spacing
+        text = re.sub(r'\s*\(\s*', ' (', text)
+        text = re.sub(r'\s*\)\s*', ') ', text)
+        
+        # Fix spacing around mathematical operators
+        text = re.sub(r'\s*=\s*', ' = ', text)
+        text = re.sub(r'\s*\+\s*', ' + ', text)
+        text = re.sub(r'\s*-\s*', ' - ', text)
+        text = re.sub(r'\s*\*\s*', ' × ', text)  # Replace * with proper multiplication
+        text = re.sub(r'\s*/\s*', ' / ', text)
+        
+        # Clean up extra spaces
+        text = re.sub(r'\s+', ' ', text)
+        text = text.strip()
         
         return text
 
@@ -531,6 +721,9 @@ class PDFCreator:
         # First convert LaTeX symbols to Unicode or proper format
         text = self._convert_latex_symbols(text)
         
+        # Improve spacing and formatting for better readability
+        text = self._improve_text_formatting(text)
+        
         pattern = re.compile(r"(\$[^$]+\$)")
         parts = pattern.split(text)
         for part in parts:
@@ -543,7 +736,9 @@ class PDFCreator:
                     story.append(RLImage(str(img_path), width=2 * inch))
                 else:
                     # Fallback to text if math rendering fails
-                    story.append(Paragraph(part, style))
+                    # Apply LaTeX symbol conversion to the expression as well
+                    converted_expr = self._convert_latex_symbols(expr)
+                    story.append(Paragraph(converted_expr, style))
             else:
                 story.append(Paragraph(part, style))
 
