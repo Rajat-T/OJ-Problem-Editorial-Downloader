@@ -327,6 +327,38 @@ class BaseScraper(ABC):
             # Clean mathematical expressions
             text = re.sub(r'\$\s*([^$]+)\s*\$', r'$\1$', text)  # Clean LaTeX
             
+            # Handle LaTeX expressions that might not be properly wrapped
+            # Look for common LaTeX commands and ensure proper spacing
+            latex_commands = [
+                r'\\leq', r'\\geq', r'\\neq', r'\\times', r'\\div', r'\\pm', r'\\mp',
+                r'\\cdot', r'\\bullet', r'\\cap', r'\\cup', r'\\subset', r'\\supset',
+                r'\\subseteq', r'\\supseteq', r'\\in', r'\\notin', r'\\emptyset',
+                r'\\infty', r'\\partial', r'\\nabla', r'\\sum', r'\\prod', r'\\int',
+                r'\\sqrt', r'\\alpha', r'\\beta', r'\\gamma', r'\\delta', r'\\epsilon',
+                r'\\theta', r'\\lambda', r'\\mu', r'\\pi', r'\\sigma', r'\\phi', r'\\omega'
+            ]
+            
+            # Ensure proper spacing around LaTeX commands
+            for cmd in latex_commands:
+                # Add space before and after if not already present
+                text = re.sub(f'(\\w){cmd}(\\w)', f'\\1 {cmd} \\2', text)
+                text = re.sub(f'(\\d){cmd}(\\d)', f'\\1 {cmd} \\2', text)
+            
+            # Clean up multiple spaces that might have been introduced
+            text = re.sub(r'\s+', ' ', text)
+            
+            # Handle common mathematical constraint patterns
+            # Example: "1 \leq T \leq 5" should have proper spacing
+            constraint_patterns = [
+                (r'(\d+)\s*\\leq\s*(\w+)\s*\\leq\s*(\d+)', r'\1 \\leq \2 \\leq \3'),
+                (r'(\d+)\s*\\geq\s*(\w+)\s*\\geq\s*(\d+)', r'\1 \\geq \2 \\geq \3'),
+                (r'(\d+)\s*\\times\s*(\d+)', r'\1 \\times \2'),
+                (r'(\w+)\s*\\times\s*(\w+)', r'\1 \\times \2'),
+            ]
+            
+            for pattern, replacement in constraint_patterns:
+                text = re.sub(pattern, replacement, text)
+            
             return text.strip()
             
         except Exception as e:

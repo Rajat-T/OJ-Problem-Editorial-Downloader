@@ -43,19 +43,63 @@ class CodeforcesScraper(BaseScraper):
                 classes = " ".join(img.get("class", []))
                 if "tex" in classes or "math" in classes:
                     latex = img.get("alt") or img.get("data-latex") or ""
-                    img.replace_with(f"${latex}$")
+                    if latex:
+                        img.replace_with(f"${latex}$")
+                    else:
+                        # Try to extract from src if available
+                        src = img.get("src", "")
+                        if "tex" in src or "math" in src:
+                            # Extract potential LaTeX from URL
+                            import urllib.parse
+                            decoded = urllib.parse.unquote(src)
+                            # Look for common LaTeX patterns in the URL
+                            if any(cmd in decoded for cmd in ['leq', 'geq', 'times', 'sum', 'int']):
+                                img.replace_with(f"[math: {decoded}]")
+                            else:
+                                img.replace_with("[math formula]")
+                        else:
+                            img.replace_with("[math formula]")
 
             # Spans with LaTeX content
             for span in container.find_all("span"):
                 classes = " ".join(span.get("class", []))
                 if "tex" in classes or "math" in classes:
                     latex = span.get("data-latex") or span.get_text(strip=True)
-                    span.replace_with(f"${latex}$")
+                    if latex:
+                        # Clean up the LaTeX content
+                        latex = latex.strip()
+                        if not latex.startswith('$') and not latex.endswith('$'):
+                            span.replace_with(f"${latex}$")
+                        else:
+                            span.replace_with(latex)
+                    else:
+                        span.replace_with("[math]")
 
             # MathJax script tags
             for script in container.find_all("script", {"type": "math/tex"}):
                 if script.string:
-                    script.replace_with(f"${script.string}$")
+                    latex_content = script.string.strip()
+                    script.replace_with(f"${latex_content}$")
+                else:
+                    script.replace_with("[math expression]")
+                    
+            # Handle inline math that might be in different formats
+            for script in container.find_all("script", {"type": "math/tex; mode=display"}):
+                if script.string:
+                    latex_content = script.string.strip()
+                    script.replace_with(f"$${latex_content}$$")
+                else:
+                    script.replace_with("[math expression]")
+                    
+            # Handle any remaining scripts that might contain math
+            for script in container.find_all("script"):
+                script_type = script.get("type", "")
+                if "math" in script_type.lower() and script.string:
+                    latex_content = script.string.strip()
+                    script.replace_with(f"${latex_content}$")
+                elif "math" in script_type.lower():
+                    script.replace_with("[math]")
+                    
         except Exception as exc:  # pragma: no cover - best effort
             logger.debug(f"Error processing math expressions: {exc}")
 

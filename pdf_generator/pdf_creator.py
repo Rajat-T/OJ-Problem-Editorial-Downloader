@@ -429,6 +429,95 @@ class PDFCreator:
             logger.warning("Unable to render math expression %s: %s", expression, exc)
             return None
 
+    def _convert_latex_symbols(self, text: str) -> str:
+        """Convert common LaTeX mathematical symbols to Unicode equivalents or proper LaTeX format.
+        
+        This handles cases where LaTeX commands appear in plain text without proper $...$ wrapping.
+        """
+        if not text:
+            return text
+            
+        # Dictionary of LaTeX commands to Unicode symbols
+        latex_to_unicode = {
+            r'\\leq': '≤',
+            r'\\geq': '≥',
+            r'\\neq': '≠',
+            r'\\times': '×',
+            r'\\div': '÷',
+            r'\\pm': '±',
+            r'\\mp': '∓',
+            r'\\cdot': '⋅',
+            r'\\bullet': '•',
+            r'\\cap': '∩',
+            r'\\cup': '∪',
+            r'\\subset': '⊂',
+            r'\\supset': '⊃',
+            r'\\subseteq': '⊆',
+            r'\\supseteq': '⊇',
+            r'\\in': '∈',
+            r'\\notin': '∉',
+            r'\\emptyset': '∅',
+            r'\\infty': '∞',
+            r'\\partial': '∂',
+            r'\\nabla': '∇',
+            r'\\sum': '∑',
+            r'\\prod': '∏',
+            r'\\int': '∫',
+            r'\\sqrt': '√',
+            r'\\alpha': 'α',
+            r'\\beta': 'β',
+            r'\\gamma': 'γ',
+            r'\\delta': 'δ',
+            r'\\epsilon': 'ε',
+            r'\\theta': 'θ',
+            r'\\lambda': 'λ',
+            r'\\mu': 'μ',
+            r'\\pi': 'π',
+            r'\\sigma': 'σ',
+            r'\\phi': 'φ',
+            r'\\omega': 'ω',
+            r'\\Delta': 'Δ',
+            r'\\Gamma': 'Γ',
+            r'\\Lambda': 'Λ',
+            r'\\Omega': 'Ω',
+            r'\\Phi': 'Φ',
+            r'\\Pi': 'Π',
+            r'\\Sigma': 'Σ',
+            r'\\Theta': 'Θ',
+            # Arrows
+            r'\\rightarrow': '→',
+            r'\\leftarrow': '←',
+            r'\\leftrightarrow': '↔',
+            r'\\Rightarrow': '⇒',
+            r'\\Leftarrow': '⇐',
+            r'\\Leftrightarrow': '⇔',
+            # Logic symbols
+            r'\\land': '∧',
+            r'\\lor': '∨',
+            r'\\lnot': '¬',
+            r'\\neg': '¬',
+            r'\\forall': '∀',
+            r'\\exists': '∃',
+            # Brackets and parentheses  
+            r'\\lfloor': '⌊',
+            r'\\rfloor': '⌋',
+            r'\\lceil': '⌈',
+            r'\\rceil': '⌉',
+            r'\\langle': '⟨',
+            r'\\rangle': '⟩',
+        }
+        
+        # Replace LaTeX commands with Unicode symbols
+        for latex_cmd, unicode_char in latex_to_unicode.items():
+            text = re.sub(latex_cmd, unicode_char, text)
+        
+        # Handle subscripts and superscripts in simple cases (but don't convert to Unicode)
+        # Instead, we'll keep them as text for better readability
+        text = re.sub(r'(\w+)_(\w+)', r'\1_\2', text)  # Keep subscripts as text
+        text = re.sub(r'(\w+)\^(\w+)', r'\1^\2', text)  # Keep superscripts as text
+        
+        return text
+
     def _add_text_with_math(self, story: List[Any], text: str, style: ParagraphStyle) -> None:
         """Add text to the story while rendering math blocks.
 
@@ -438,7 +527,10 @@ class PDFCreator:
         images.  This keeps the surrounding text searchable and
         copy‑able whilst still allowing mathematical notation.
         """
-
+        
+        # First convert LaTeX symbols to Unicode or proper format
+        text = self._convert_latex_symbols(text)
+        
         pattern = re.compile(r"(\$[^$]+\$)")
         parts = pattern.split(text)
         for part in parts:
@@ -449,6 +541,9 @@ class PDFCreator:
                 img_path = self._render_math(expr)
                 if img_path:
                     story.append(RLImage(str(img_path), width=2 * inch))
+                else:
+                    # Fallback to text if math rendering fails
+                    story.append(Paragraph(part, style))
             else:
                 story.append(Paragraph(part, style))
 
