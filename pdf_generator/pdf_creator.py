@@ -37,11 +37,17 @@ import os
 import re
 import shutil
 from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import requests
-from PIL import Image
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    Image = None
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 from reportlab.lib.pagesizes import A4
@@ -476,276 +482,341 @@ class PDFCreator:
 
         try:
             import matplotlib.pyplot as plt
-            import matplotlib.font_manager as fm
+            from matplotlib import rc
 
-            # Try to use a font with better mathematical symbol support
-            try:
-                # Try DejaVu Sans which has good Unicode support
-                plt.rcParams['font.family'] = 'DejaVu Sans'
-            except:
-                # Fallback to default
-                plt.rcParams['font.family'] = 'sans-serif'
+            # Configure matplotlib to use LaTeX for rendering
+            rc("text", usetex=True)
+            rc("font", family="serif")
 
-            fig = plt.figure(figsize=(len(expression) * 0.2, 0.5))  # Dynamic sizing
+            # Create a figure for the math expression
+            fig = plt.figure(figsize=(len(expression) * 0.2, 0.5))
             fig.patch.set_alpha(0.0)
-            
-            # Use a larger font size for better clarity
-            text = fig.text(0.5, 0.5, f"${expression}$", fontsize=14, ha='center', va='center')
+
+            # Render the LaTeX expression
+            text = fig.text(0.5, 0.5, f"${expression}$", fontsize=14, ha="center", va="center")
             plt.axis("off")
-            
-            # Create a buffer to save the image
+
+            # Save the rendered image to a buffer
             buffer = io.BytesIO()
-            
-            # Save with high DPI for better quality
-            fig.savefig(buffer, format="png", bbox_inches="tight", 
-                       pad_inches=0.1, dpi=300, 
-                       transparent=True,  # Transparent background
-                       facecolor='none',  # No face color
-                       edgecolor='none')  # No edge color
-            
+            fig.savefig(buffer, format="png", bbox_inches="tight", pad_inches=0.1, dpi=300, transparent=True)
             plt.close(fig)
             buffer.seek(0)
 
+            # Save the buffer to a file in the image cache
             filename = f"math_{abs(hash(expression))}.png"
             path = self.image_cache_dir / filename
             path.write_bytes(buffer.getvalue())
             return path
-        except Exception as exc:  # pragma: no cover - optional feature
+
+        except Exception as exc:
             logger.warning("Unable to render math expression %s: %s", expression, exc)
             return None
 
+    def _render_html_to_pdf(self, html_content: str, output_path: Path) -> None:
+        """Render HTML content to a PDF file using WeasyPrint."""
+        try:
+            from weasyprint import HTML
+
+            # Render the HTML content to a PDF
+            HTML(string=html_content).write_pdf(str(output_path))
+
+        except ImportError:
+            logger.error("WeasyPrint is not installed. Please install it to enable HTML-to-PDF rendering.")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to render HTML to PDF: {e}")
+            raise
+
     def _convert_latex_symbols(self, text: str) -> str:
-        """Convert common LaTeX mathematical symbols to Unicode equivalents or proper LaTeX format.
+        """Convert LaTeX mathematical symbols to Unicode equivalents with enhanced coverage.
         
-        This handles cases where LaTeX commands appear in plain text without proper $...$ wrapping.
+        This method provides comprehensive conversion of LaTeX commands to Unicode symbols,
+        handling mathematical notation commonly found in competitive programming problems.
+        Enhanced to preserve visual layout and mathematical meaning.
         """
         if not text:
             return text
             
-        # Dictionary of LaTeX commands to Unicode symbols
+        # Comprehensive dictionary of LaTeX commands to Unicode symbols
+        # Organized by category for better maintainability
         latex_to_unicode = {
-            # Comparison operators
-            r'\leq': '≤',
-            r'\geq': '≥',
-            r'\neq': '≠',
-            r'\le': '≤',
-            r'\ge': '≥',
-            r'\ne': '≠',
-            r'\approx': '≈',
-            r'\equiv': '≡',
-            r'\cong': '≅',
-            r'\sim': '∼',
-            r'\propto': '∝',
-            # Arithmetic symbols
-            r'\times': '×',
-            r'\div': '÷',
-            r'\pm': '±',
-            r'\mp': '∓',
-            r'\cdot': '⋅',
-            r'\bullet': '•',
-            r'\ast': '∗',
-            r'\star': '⋆',
-            r'\oplus': '⊕',
-            r'\ominus': '⊖',
-            r'\otimes': '⊗',
-            r'\oslash': '⊘',
-            # Dots and ellipses
-            r'\vdots': '⋮',
-            r'\hdots': '⋯',
-            r'\ddots': '⋱',
-            r'\ldots': '...',
-            r'\cdots': '⋯',
-            # Set theory symbols
-            r'\cap': '∩',
-            r'\cup': '∪',
-            r'\subset': '⊂',
-            r'\supset': '⊃',
-            r'\subseteq': '⊆',
-            r'\supseteq': '⊇',
-            r'\subsetneq': '⊊',
-            r'\supsetneq': '⊋',
-            r'\in': '∈',
-            r'\notin': '∉',
-            r'\ni': '∋',
-            r'\emptyset': '∅',
-            r'\varnothing': '∅',
-            # Mathematical symbols
-            r'\infty': '∞',
-            r'\partial': '∂',
-            r'\nabla': '∇',
-            r'\sum': '∑',
-            r'\prod': '∏',
-            r'\int': '∫',
-            r'\oint': '∮',
-            r'\sqrt': '√',
-            r'\angle': '∠',
-            r'\perp': '⊥',
-            r'\parallel': '∥',
-            r'\triangle': '△',
-            r'\square': '□',
-            r'\diamond': '⋄',
-            r'\circ': '∘',
-            r'\bigcirc': '○',
-            # Greek lowercase letters
-            r'\alpha': 'α',
-            r'\beta': 'β',
-            r'\gamma': 'γ',
-            r'\delta': 'δ',
-            r'\epsilon': 'ε',
-            r'\varepsilon': 'ε',
-            r'\zeta': 'ζ',
-            r'\eta': 'η',
-            r'\theta': 'θ',
-            r'\vartheta': 'ϑ',
-            r'\iota': 'ι',
-            r'\kappa': 'κ',
-            r'\lambda': 'λ',
-            r'\mu': 'μ',
-            r'\nu': 'ν',
-            r'\xi': 'ξ',
-            r'\pi': 'π',
-            r'\varpi': 'ϖ',
-            r'\rho': 'ρ',
-            r'\varrho': 'ϱ',
-            r'\sigma': 'σ',
-            r'\varsigma': 'ς',
-            r'\tau': 'τ',
-            r'\upsilon': 'υ',
-            r'\phi': 'φ',
-            r'\varphi': 'φ',
-            r'\chi': 'χ',
-            r'\psi': 'ψ',
-            r'\omega': 'ω',
+            # Comparison and relation operators
+            r'\leq': '≤', r'\le': '≤', r'\leqslant': '≤',
+            r'\geq': '≥', r'\ge': '≥', r'\geqslant': '≥',
+            r'\neq': '≠', r'\ne': '≠', r'\not=': '≠',
+            r'\approx': '≈', r'\thickapprox': '≈',
+            r'\equiv': '≡', r'\cong': '≅', r'\sim': '∼', r'\simeq': '≃',
+            r'\propto': '∝', r'\varpropto': '∝',
+            r'\prec': '≺', r'\succ': '≻', r'\preceq': '⪯', r'\succeq': '⪰',
+            r'\ll': '≪', r'\gg': '≫',
+            
+            # Arithmetic and binary operations
+            r'\times': '×', r'\div': '÷', r'\pm': '±', r'\mp': '∓',
+            r'\cdot': '⋅', r'\bullet': '•', r'\ast': '∗', r'\star': '⋆',
+            r'\oplus': '⊕', r'\ominus': '⊖', r'\otimes': '⊗', r'\oslash': '⊘',
+            r'\odot': '⊙', r'\circ': '∘', r'\bigcirc': '○',
+            r'\dagger': '†', r'\ddagger': '‡', r'\amalg': '⨿',
+            
+            # Dots, ellipses and spacing
+            r'\vdots': '⋮', r'\hdots': '⋯', r'\ddots': '⋱', r'\iddots': '⋰',
+            r'\ldots': '…', r'\cdots': '⋯', r'\dots': '…',
+            
+            # Set theory and logic symbols  
+            r'\cap': '∩', r'\cup': '∪', r'\bigcap': '⋂', r'\bigcup': '⋃',
+            r'\subset': '⊂', r'\supset': '⊃', r'\subseteq': '⊆', r'\supseteq': '⊇',
+            r'\subsetneq': '⊊', r'\supsetneq': '⊋', r'\varsubsetneq': '⊊', r'\varsupsetneq': '⊋',
+            r'\in': '∈', r'\notin': '∉', r'\ni': '∋', r'\not\ni': '∌',
+            r'\emptyset': '∅', r'\varnothing': '∅',
+            r'\land': '∧', r'\wedge': '∧', r'\lor': '∨', r'\vee': '∨',
+            r'\lnot': '¬', r'\neg': '¬', r'\top': '⊤', r'\bot': '⊥',
+            r'\forall': '∀', r'\exists': '∃', r'\nexists': '∄',
+            r'\models': '⊨', r'\vdash': '⊢', r'\dashv': '⊣',
+            
+            # Mathematical operators and functions
+            r'\infty': '∞', r'\partial': '∂', r'\nabla': '∇',
+            r'\sum': '∑', r'\prod': '∏', r'\coprod': '∐',
+            r'\int': '∫', r'\iint': '∬', r'\iiint': '∭', r'\oint': '∮',
+            r'\sqrt': '√', r'\angle': '∠', r'\measuredangle': '∡', r'\sphericalangle': '∢',
+            r'\perp': '⊥', r'\parallel': '∥', r'\nparallel': '∦',
+            r'\triangle': '△', r'\square': '□', r'\diamond': '⋄',
+            r'\Box': '□', r'\Diamond': '◊', r'\clubsuit': '♣',
+            r'\diamondsuit': '♢', r'\heartsuit': '♡', r'\spadesuit': '♠',
+            
+            # Greek lowercase letters (comprehensive)
+            r'\alpha': 'α', r'\beta': 'β', r'\gamma': 'γ', r'\delta': 'δ',
+            r'\epsilon': 'ε', r'\varepsilon': 'ε', r'\zeta': 'ζ', r'\eta': 'η',
+            r'\theta': 'θ', r'\vartheta': 'ϑ', r'\iota': 'ι',
+            r'\kappa': 'κ', r'\varkappa': 'ϰ', r'\lambda': 'λ', r'\mu': 'μ',
+            r'\nu': 'ν', r'\xi': 'ξ', r'\pi': 'π', r'\varpi': 'ϖ',
+            r'\rho': 'ρ', r'\varrho': 'ϱ', r'\sigma': 'σ', r'\varsigma': 'ς',
+            r'\tau': 'τ', r'\upsilon': 'υ', r'\phi': 'φ', r'\varphi': 'ϕ',
+            r'\chi': 'χ', r'\psi': 'ψ', r'\omega': 'ω',
+            
             # Greek uppercase letters
-            r'\Alpha': 'Α',
-            r'\Beta': 'Β',
-            r'\Gamma': 'Γ',
-            r'\Delta': 'Δ',
-            r'\Epsilon': 'Ε',
-            r'\Zeta': 'Ζ',
-            r'\Eta': 'Η',
-            r'\Theta': 'Θ',
-            r'\Iota': 'Ι',
-            r'\Kappa': 'Κ',
-            r'\Lambda': 'Λ',
-            r'\Mu': 'Μ',
-            r'\Nu': 'Ν',
-            r'\Xi': 'Ξ',
-            r'\Pi': 'Π',
-            r'\Rho': 'Ρ',
-            r'\Sigma': 'Σ',
-            r'\Tau': 'Τ',
-            r'\Upsilon': 'Υ',
-            r'\Phi': 'Φ',
-            r'\Chi': 'Χ',
-            r'\Psi': 'Ψ',
-            r'\Omega': 'Ω',
-            # Arrows
-            r'\rightarrow': '→',
-            r'\to': '→',
-            r'\leftarrow': '←',
-            r'\gets': '←',
-            r'\leftrightarrow': '↔',
-            r'\uparrow': '↑',
-            r'\downarrow': '↓',
-            r'\updownarrow': '↕',
-            r'\nearrow': '↗',
-            r'\searrow': '↘',
-            r'\swarrow': '↙',
-            r'\nwarrow': '↖',
-            r'\Rightarrow': '⇒',
-            r'\Leftarrow': '⇐',
-            r'\Leftrightarrow': '⇔',
-            r'\Uparrow': '⇑',
-            r'\Downarrow': '⇓',
-            r'\Updownarrow': '⇕',
-            r'\mapsto': '↦',
-            r'\longmapsto': '⟼',
-            r'\longrightarrow': '⟶',
-            r'\longleftarrow': '⟵',
-            r'\longleftrightarrow': '⟷',
-            # Logic symbols
-            r'\land': '∧',
-            r'\wedge': '∧',
-            r'\lor': '∨',
-            r'\vee': '∨',
-            r'\lnot': '¬',
-            r'\neg': '¬',
-            r'\forall': '∀',
-            r'\exists': '∃',
-            r'\nexists': '∄',
-            r'\top': '⊤',
-            r'\bot': '⊥',
-            r'\models': '⊨',
-            r'\vdash': '⊢',
-            r'\dashv': '⊣',
-            # Brackets and parentheses  
-            r'\lfloor': '⌊',
-            r'\rfloor': '⌋',
-            r'\lceil': '⌈',
-            r'\rceil': '⌉',
-            r'\langle': '⟨',
-            r'\rangle': '⟩',
-            r'\llbracket': '⟦',
-            r'\rrbracket': '⟧',
-            # Miscellaneous symbols
-            r'\mid': '∣',
-            r'\parallel': '∥',
-            r'\nmid': '∤',
-            r'\nparallel': '∦',
-            r'\hbar': 'ℏ',
-            r'\ell': 'ℓ',
-            r'\wp': '℘',
-            r'\Re': 'ℜ',
-            r'\Im': 'ℑ',
-            r'\aleph': 'ℵ',
-            r'\beth': 'ℶ',
-            r'\gimel': 'ℷ',
-            r'\daleth': 'ℸ',
-            r'\clubsuit': '♣',
-            r'\diamondsuit': '♢',
-            r'\heartsuit': '♡',
-            r'\spadesuit': '♠',
+            r'\Alpha': 'Α', r'\Beta': 'Β', r'\Gamma': 'Γ', r'\Delta': 'Δ',
+            r'\Epsilon': 'Ε', r'\Zeta': 'Ζ', r'\Eta': 'Η', r'\Theta': 'Θ',
+            r'\Iota': 'Ι', r'\Kappa': 'Κ', r'\Lambda': 'Λ', r'\Mu': 'Μ',
+            r'\Nu': 'Ν', r'\Xi': 'Ξ', r'\Pi': 'Ο', r'\Rho': 'Ρ',
+            r'\Sigma': 'Σ', r'\Tau': 'Τ', r'\Upsilon': 'Υ', r'\Phi': 'Φ',
+            r'\Chi': 'Χ', r'\Psi': 'Ψ', r'\Omega': 'Ω',
+            
+            # Arrows (comprehensive collection)
+            r'\rightarrow': '→', r'\to': '→', r'\longrightarrow': '⟶',
+            r'\leftarrow': '←', r'\gets': '←', r'\longleftarrow': '⟵',
+            r'\leftrightarrow': '↔', r'\longleftrightarrow': '⟷',
+            r'\uparrow': '↑', r'\downarrow': '↓', r'\updownarrow': '↕',
+            r'\nearrow': '↗', r'\searrow': '↘', r'\swarrow': '↙', r'\nwarrow': '↖',
+            r'\Rightarrow': '⇒', r'\Leftarrow': '⇐', r'\Leftrightarrow': '⇔',
+            r'\Uparrow': '⇑', r'\Downarrow': '⇓', r'\Updownarrow': '⇕',
+            r'\mapsto': '↦', r'\longmapsto': '⟼', r'\hookrightarrow': '↪',
+            r'\hookleftarrow': '↩', r'\rightharpoonup': '⇀', r'\rightharpoondown': '⇁',
+            r'\leftharpoonup': '↼', r'\leftharpoondown': '↽',
+            
+            # Brackets and delimiters
+            r'\lfloor': '⌊', r'\rfloor': '⌋', r'\lceil': '⌈', r'\rceil': '⌉',
+            r'\langle': '⟨', r'\rangle': '⟩', r'\llbracket': '⟦', r'\rrbracket': '⟧',
+            r'\{': '{', r'\}': '}', r'\|': '∥',
+            
+            # Miscellaneous mathematical symbols
+            r'\mid': '∣', r'\nmid': '∤', r'\shortmid': '∣',
+            r'\hbar': 'ℏ', r'\ell': 'ℓ', r'\wp': '℘',
+            r'\Re': 'ℜ', r'\Im': 'ℑ', r'\aleph': 'ℵ',
+            r'\beth': 'ℶ', r'\gimel': 'ℷ', r'\daleth': 'ℸ',
+            r'\prime': '′', r'\backprime': '‵', r'\sharp': '♯', r'\flat': '♭',
+            r'\natural': '♮', r'\surd': '√',
+            
+            # Blackboard bold (double-struck) letters
+            r'\mathbb{N}': 'ℕ', r'\mathbb{Z}': 'ℤ', r'\mathbb{Q}': 'ℚ',
+            r'\mathbb{R}': 'ℝ', r'\mathbb{C}': 'ℂ', r'\mathbb{P}': 'ℙ',
+            r'\mathbb{H}': 'ℍ', r'\mathbb{F}': '𝔽',
+            
+            # Additional operators and symbols
+            r'\bigwedge': '⋀', r'\bigvee': '⋁', r'\biguplus': '⨄',
+            r'\bigsqcup': '⨆', r'\bigotimes': '⨂', r'\bigoplus': '⨁',
+            r'\bigodot': '⨀', r'\coprod': '∐',
+            
+            # Miscellaneous symbols for competitive programming
+            r'\checkmark': '✓', r'\times': '×', r'\div': '÷',
+            r'\deg': '°', r'\celsius': '℃', r'\ohm': 'Ω',
         }
         
-        # Replace LaTeX commands with Unicode symbols
+        # Enhanced LaTeX command processing with proper word boundaries
+        # Use negative lookbehind to avoid double-processing escaped backslashes
         for latex_cmd, unicode_char in latex_to_unicode.items():
-            # Use word boundaries to avoid partial matches
             # Escape special regex characters in the LaTeX command
             escaped_cmd = re.escape(latex_cmd)
-            text = re.sub(r'(?<!\\)' + escaped_cmd, unicode_char, text)
+            # Use word boundaries and negative lookbehind for proper matching
+            pattern = r'(?<!\\)' + escaped_cmd + r'(?![a-zA-Z])'
+            text = re.sub(pattern, unicode_char, text)
         
-        # Handle common mathematical formatting patterns
-        # Convert subscripts and superscripts to more readable format
-        text = re.sub(r'([A-Za-z0-9])_\{([^}]+)\}', r'\1\2', text)  # A_{i} -> Ai (simpler for PDF)
-        text = re.sub(r'([A-Za-z0-9])_([A-Za-z0-9])', r'\1\2', text)  # A_i -> Ai (simpler for PDF)
-        text = re.sub(r'([A-Za-z0-9])\^\{([^}]+)\}', r'\1^\2', text)  # A^{i} -> A^i
-        text = re.sub(r'([A-Za-z0-9])\^([A-Za-z0-9])', r'\1^\2', text)  # A^i -> A^i
+        # Handle mathematical expressions and environments
+        # Preserve equation environments but convert content
+        equation_patterns = [
+            (r'\\begin{equation}(.*?)\\end{equation}', r'\\1'),
+            (r'\\begin{align}(.*?)\\end{align}', r'\\1'),
+            (r'\\begin{eqnarray}(.*?)\\end{eqnarray}', r'\\1'),
+            (r'\\[(.*?)\\]', r'\\1'),  # Display math \[...\]
+            (r'\$\$(.*?)\$\$', r'\\1'),  # Display math $$...$$
+        ]
         
-        # Clean up common LaTeX formatting issues
-        text = re.sub(r'\\text\{([^}]+)\}', r'\1', text)  # \text{something} -> something
-        text = re.sub(r'\\mathrm\{([^}]+)\}', r'\1', text)  # \mathrm{something} -> something
-        text = re.sub(r'\\textbf\{([^}]+)\}', r'\1', text)  # \textbf{something} -> something
-        text = re.sub(r'\\textit\{([^}]+)\}', r'\1', text)  # \textit{something} -> something
+        for pattern, replacement in equation_patterns:
+            text = re.sub(pattern, replacement, text, flags=re.DOTALL)
         
-        # Handle fractions in a more readable way
-        text = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1)/(\2)', text)  # \frac{a}{b} -> (a)/(b)
+        # Enhanced subscript and superscript handling for competitive programming
+        # Handle complex subscripts with braces: A_{max} -> A[max], x_{i,j} -> x[i,j]
+        text = re.sub(r'([A-Za-z0-9])_\{([^}]+)\}', r'\1[\2]', text)
+        text = re.sub(r'([A-Za-z0-9])_([A-Za-z0-9]+)', r'\1[\2]', text)
         
-        # Handle common spacing commands
-        text = re.sub(r'\\,', ' ', text)  # thin space
-        text = re.sub(r'\\;', '  ', text)  # medium space
-        text = re.sub(r'\\quad', '    ', text)  # quad space
-        text = re.sub(r'\\qquad', '        ', text)  # double quad space
+        # Handle superscripts: A^{n} -> A^n, x^2 -> x^2  
+        text = re.sub(r'([A-Za-z0-9])\^\{([^}]+)\}', r'\1^\2', text)
+        text = re.sub(r'([A-Za-z0-9])\^([A-Za-z0-9]+)', r'\1^\2', text)
         
-        # Clean up remaining backslashes from LaTeX commands
-        text = re.sub(r'\\([a-zA-Z]+)', r'\1', text)  # Remove backslash from unrecognized commands
+        # Clean up LaTeX text formatting commands
+        text_formatting_commands = {
+            r'\\text\{([^}]+)\}': r'\1',  # \text{something} -> something
+            r'\\mathrm\{([^}]+)\}': r'\1',  # \mathrm{something} -> something  
+            r'\\mathbf\{([^}]+)\}': r'\1',  # \mathbf{something} -> something
+            r'\\textbf\{([^}]+)\}': r'\1',  # \textbf{something} -> something
+            r'\\textit\{([^}]+)\}': r'\1',  # \textit{something} -> something
+            r'\\emph\{([^}]+)\}': r'\1',   # \emph{something} -> something
+            r'\\mathit\{([^}]+)\}': r'\1', # \mathit{something} -> something
+            r'\\mathcal\{([^}]+)\}': r'\1', # \mathcal{something} -> something
+            r'\\mathfrak\{([^}]+)\}': r'\1', # \mathfrak{something} -> something
+            r'\\mathbb\{([^}]+)\}': r'\1',  # \mathbb{something} -> something (if not handled above)
+        }
+        
+        for pattern, replacement in text_formatting_commands.items():
+            text = re.sub(pattern, replacement, text)
+        
+        # Handle fractions with proper formatting for readability
+        # \frac{a}{b} -> (a)/(b) for simple cases, or a/b for single characters
+        def format_fraction(match):
+            numerator, denominator = match.groups()
+            # Simple single character fractions
+            if len(numerator.strip()) == 1 and len(denominator.strip()) == 1:
+                return f"{numerator}/{denominator}"
+            # Complex fractions with parentheses
+            else:
+                return f"({numerator})/({denominator})"
+        
+        text = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', format_fraction, text)
+        
+        # Handle roots and other mathematical functions
+        text = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', text)  # √(content)
+        text = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', text)  # n√(content)
+        
+        # Handle binomial coefficients
+        text = re.sub(r'\\binom\{([^}]+)\}\{([^}]+)\}', r'C(\1,\2)', text)
+        
+        # Handle spacing commands with appropriate Unicode spacing
+        spacing_commands = {
+            r'\\,': '\u2009',        # thin space
+            r'\\:': '\u2005',        # medium space  
+            r'\\;': '\u2004',        # thick space
+            r'\\quad': '\u2003',     # em space
+            r'\\qquad': '\u2003\u2003', # double em space
+            r'\\!': '',             # negative thin space (remove)
+            r'\\ ': ' ',            # normal space
+        }
+        
+        for pattern, replacement in spacing_commands.items():
+            text = re.sub(pattern, replacement, text)
+        
+        # Clean up remaining unrecognized LaTeX commands
+        # First preserve common function names
+        function_names = [
+            'sin', 'cos', 'tan', 'cot', 'sec', 'csc',
+            'sinh', 'cosh', 'tanh', 'coth', 'sech', 'csch',
+            'arcsin', 'arccos', 'arctan', 'arccot', 'arcsec', 'arccsc',
+            'log', 'ln', 'lg', 'exp', 'max', 'min', 'sup', 'inf',
+            'lim', 'limsup', 'liminf', 'det', 'gcd', 'lcm', 'mod'
+        ]
+        
+        # Convert function commands to readable form
+        for func in function_names:
+            text = re.sub(f'\\\\{func}\\b', func, text)
+        
+        # Remove backslashes from unrecognized commands (but preserve the content)
+        text = re.sub(r'\\([a-zA-Z]+)\b', r'\1', text)  # \command -> command
         
         return text
+
+    def _sanitize_html_content(self, text: str) -> str:
+        """Sanitize HTML content to fix malformed attributes and tags that cause ReportLab parsing errors."""
+        if not text:
+            return text
+        
+        # Remove malformed HTML content that contains invalid attributes
+        # This prevents ReportLab paragraph parser errors
+        
+        # First, try to identify and remove problematic HTML tags entirely
+        # Look for tags with invalid attribute syntax (spaces around =)
+        text = re.sub(r'<[^>]*class\s*=\s*"[^"]*"[^>]*>', '', text)
+        text = re.sub(r'<span[^>]*class\s*=\s*"[^"]*"[^>]*>', '', text)
+        text = re.sub(r'</span>', '', text)
+        
+        # Remove any remaining malformed HTML tags with spaces around equals
+        text = re.sub(r'<[^>]*\s=\s[^>]*>', '', text)
+        
+        # Clean up common problematic HTML patterns
+        problematic_patterns = [
+            r'<div[^>]*class\s*=\s*"[^"]*"[^>]*>',  # Malformed div tags
+            r'<p[^>]*class\s*=\s*"[^"]*"[^>]*>',    # Malformed p tags
+            r'<h[1-6][^>]*class\s*=\s*"[^"]*"[^>]*>', # Malformed heading tags
+            r'<h\[\d+\]>[^<]*</h\[\d+\]>',          # Malformed heading tags like <h[3]>
+            r'<h\[\d+\]>',                          # Opening malformed headings
+            r'</h\[\d+\]>',                         # Closing malformed headings
+            r'<section[^>]*>',  # Remove section tags
+            r'</section>',
+            r'<div[^>]*>',      # Remove all div tags for safety
+            r'</div>',
+            r'<hr\s*/?\s*>',   # Remove hr tags
+            r'<br\s*/?\s*>',   # Convert br to newlines later
+        ]
+        
+        for pattern in problematic_patterns:
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+        
+        # Convert remaining valid HTML elements to safe equivalents
+        # Handle basic formatting that we want to preserve
+        html_conversions = {
+            r'<var>([^<]*)</var>': r'\1',  # Remove var tags but keep content
+            r'<var>([^<]*)< / var>': r'\1',  # Handle broken var tags with spaces
+            r'<var>([^<]*)<\s*/\s*var>': r'\1',  # Handle var tags with spaced closing
+            r'<code>([^<]*)</code>': r'\1',  # Remove code tags but keep content
+            r'<strong>([^<]*)</strong>': r'\1',  # Remove strong tags
+            r'<b>([^<]*)</b>': r'\1',  # Remove bold tags
+            r'<em>([^<]*)</em>': r'\1',  # Remove emphasis tags
+            r'<i>([^<]*)</i>': r'\1',  # Remove italic tags
+            r'<u>([^<]*)</u>': r'\1',  # Remove underline tags
+            r'<h[1-6][^>]*>([^<]*)</h[1-6]>': r'\1',  # Remove heading tags but keep content
+            r'<p[^>]*>([^<]*)</p>': r'\1\n\n',  # Convert p tags to double newlines
+            r'<li[^>]*>([^<]*)</li>': r'• \1\n',  # Convert list items to bullet points
+            r'<ul[^>]*>': '',  # Remove ul tags
+            r'</ul>': '\n',
+            r'<ol[^>]*>': '',  # Remove ol tags
+            r'</ol>': '\n',
+        }
+        
+        for pattern, replacement in html_conversions.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE | re.DOTALL)
+        
+        # Remove any remaining HTML tags that might cause issues
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Clean up multiple newlines and spaces
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = re.sub(r'[ \t]+', ' ', text)
+        
+        return text.strip()
 
     def _improve_text_formatting(self, text: str) -> str:
         """Improve text formatting for better readability in PDFs."""
         if not text:
             return text
+        
+        # First sanitize HTML content to prevent ReportLab parsing errors
+        text = self._sanitize_html_content(text)
         
         # Decode HTML entities first
         text = html.unescape(text)
@@ -859,40 +930,68 @@ class PDFCreator:
         for entity, replacement in html_entities.items():
             text = text.replace(entity, replacement)
         
-        # Fix common patterns from competitive programming problems
-        # Handle case subscripts properly
+        # Fix common patterns from competitive programming problems with enhanced intelligence
+        # Handle case subscripts properly - be more conservative to avoid false positives
         text = re.sub(r'\bcase([0-9]+)\b', r'case_\1', text)  # case1 → case_1
         text = re.sub(r'\boutput([0-9]+)\b', r'output_\1', text)  # output1 → output_1
         text = re.sub(r'\binput([0-9]+)\b', r'input_\1', text)  # input1 → input_1
+        text = re.sub(r'\btest([0-9]+)\b', r'test_\1', text)  # test1 → test_1
+        text = re.sub(r'\bsample([0-9]+)\b', r'sample_\1', text)  # sample1 → sample_1
         
-        # Handle variable subscripts  
-        text = re.sub(r'\b([A-Za-z])([0-9]+)\b', r'\1_\2', text)  # A1 → A_1 (but only standalone)
+        # Handle variable subscripts - but be careful about valid words
+        # Only apply to standalone mathematical variables (single letters)
+        text = re.sub(r'\b([A-Za-z])([0-9]+)\b(?![a-zA-Z])', r'\1_\2', text)  # A1 → A_1 (but not for words like "A1B2")
         
-        # First handle patterns where letters get concatenated incorrectly
-        # Be more specific to avoid false positives
-        text = re.sub(r'\b([a-z]+)n([A-Z])n\b', r'\1_\2', text)  # casenTn → case_T
-        text = re.sub(r'\b([A-Z])n([A-Z])n\b', r'\1_\2', text)  # AnNn → A_N  
-        text = re.sub(r'\b([A-Z])n([a-z])n\b', r'\1_\2', text)  # Anin → A_i
-        text = re.sub(r'\b([a-z]+)n([a-z])n\b', r'\1_\2', text)  # outputnin → output_i
+        # Enhanced handling of corrupted concatenated patterns from web scraping
+        # These patterns occur when text gets mangled during HTML parsing
+        corruption_patterns = [
+            (r'\b([a-z]+)n([A-Z])n\b', r'\1_\2'),  # casenTn → case_T
+            (r'\b([A-Z])n([A-Z])n\b', r'\1_\2'),  # AnNn → A_N  
+            (r'\b([A-Z])n([a-z]+)n\b', r'\1_\2'), # Anin → A_i
+            (r'\b([a-z]+)n([a-z]+)n\b', r'\1_\2'), # outputnin → output_i
+            (r'\b([A-Za-z]+)([0-9])([A-Za-z]+)([0-9])\b', r'\1\2_\3\4'), # case1T1 → case1_T1
+        ]
         
-        # Pattern: word_number_ → word_number (remove trailing underscore)
-        text = re.sub(r'([a-zA-Z]+)_([0-9]+)_', r'\1_\2', text)
+        for pattern, replacement in corruption_patterns:
+            text = re.sub(pattern, replacement, text)
         
-        # For PDF compatibility, use bracket notation for subscripts
-        # Pattern: Letter_X_ → Letter[X] for better PDF compatibility
+        # Clean up multiple underscores and trailing underscores
+        text = re.sub(r'_+', '_', text)  # Multiple underscores to single
+        text = re.sub(r'([a-zA-Z]+)_([0-9]+)_+', r'\1_\2', text)  # Remove trailing underscores
+        
+        # For PDF compatibility, convert to bracket notation (better rendering)
+        # Pattern: Letter_X → Letter[X] for better PDF compatibility and readability
         text = re.sub(r'\b([A-Za-z]+)_([0-9]+)\b', r'\1[\2]', text)  # case_1 → case[1]
+        text = re.sub(r'\b([A-Za-z])_([a-zA-Z]+)\b', r'\1[\2]', text)  # A_max → A[max]
         text = re.sub(r'\b([A-Za-z])_([a-zA-Z])\b', r'\1[\2]', text)  # A_i → A[i]
         
-        # Pattern: standalone _X_ → [X] (but not for words)
-        text = re.sub(r'\b_([0-9]+)_\b', r'[\1]', text)
-        text = re.sub(r'\b_([a-zA-Z])_\b', r'[\1]', text)
+        # Handle standalone subscript patterns
+        text = re.sub(r'\b_([0-9]+)_\b', r'[\1]', text)  # _1_ → [1]
+        text = re.sub(r'\b_([a-zA-Z]+)_\b', r'[\1]', text)  # _max_ → [max]
         
-        # Fix double underscores
-        text = re.sub(r'__+', '_', text)
+        # Enhanced mathematical notation cleanup
+        # Handle mathematical ranges and constraints properly
+        constraint_patterns = [
+            (r'([0-9]+)\s*≤\s*([A-Za-z_\[\]]+)\s*≤\s*([0-9]+)', r'\1 ≤ \2 ≤ \3'),
+            (r'([0-9]+)\s*≥\s*([A-Za-z_\[\]]+)\s*≥\s*([0-9]+)', r'\1 ≥ \2 ≥ \3'),
+            (r'([0-9]+)\s*<\s*([A-Za-z_\[\]]+)\s*<\s*([0-9]+)', r'\1 < \2 < \3'),
+            (r'([0-9]+)\s*>\s*([A-Za-z_\[\]]+)\s*>\s*([0-9]+)', r'\1 > \2 > \3'),
+        ]
         
-        # Clean up leading/trailing underscores around spaces
-        text = re.sub(r'_\s+', ' ', text)
-        text = re.sub(r'\s+_+', ' ', text)
+        for pattern, replacement in constraint_patterns:
+            text = re.sub(pattern, replacement, text)
+        
+        # Fix spacing around mathematical operators
+        operator_spacing = [
+            (r'([A-Za-z0-9])\+([A-Za-z0-9])', r'\1 + \2'),
+            (r'([A-Za-z0-9])-([A-Za-z0-9])', r'\1 - \2'),
+            (r'([A-Za-z0-9])\*([A-Za-z0-9])', r'\1 × \2'),
+            (r'([A-Za-z0-9])/([A-Za-z0-9])', r'\1 / \2'),
+            (r'([A-Za-z0-9])=([A-Za-z0-9])', r'\1 = \2'),
+        ]
+        
+        for pattern, replacement in operator_spacing:
+            text = re.sub(pattern, replacement, text)
         
         # Fix common spacing issues
         text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
@@ -1108,9 +1207,36 @@ class PDFCreator:
         
         # If no math expressions, just add as paragraph with proper spacing
         if len(parts) == 1:
-            story.append(Paragraph(text, style))
-            story.append(Spacer(1, 4))  # Add consistent spacing between paragraphs
-            return
+            try:
+                story.append(Paragraph(text, style))
+                story.append(Spacer(1, 4))  # Add consistent spacing between paragraphs
+                return
+            except Exception as e:
+                logger.error(f"ReportLab paragraph parsing error: {e}")
+                logger.error(f"Problematic text: {text[:200]}...")
+                
+                # Fallback: try with further sanitized text
+                try:
+                    # Remove all HTML-like content as emergency fallback
+                    fallback_text = re.sub(r'<[^>]*>', '', text)
+                    fallback_text = html.unescape(fallback_text)
+                    fallback_text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', fallback_text)  # Remove control characters
+                    story.append(Paragraph(fallback_text, style))
+                    story.append(Spacer(1, 4))
+                    return
+                except Exception as e2:
+                    logger.error(f"Fallback paragraph creation also failed: {e2}")
+                    # Last resort: add as preformatted text
+                    try:
+                        story.append(Preformatted(text, self.styles.get("Code", style)))
+                        story.append(Spacer(1, 4))
+                        return
+                    except Exception as e3:
+                        logger.error(f"Preformatted text creation failed: {e3}")
+                        # Skip this text entirely rather than crash
+                        story.append(Paragraph("[Content could not be rendered due to formatting issues]", style))
+                        story.append(Spacer(1, 4))
+                        return
         
         # Process text with math expressions
         for part in parts:
@@ -1124,7 +1250,23 @@ class PDFCreator:
                     expr = part[1:-1]
                 else:
                     # Not a valid math expression, treat as regular text
-                    story.append(Paragraph(part, style))
+                    try:
+                        story.append(Paragraph(part, style))
+                    except Exception as e:
+                        logger.warning(f"Failed to create paragraph for invalid math text: {e}")
+                        try:
+                            # Sanitize the text and try again
+                            clean_part = re.sub(r'<[^>]*>', '', part)
+                            clean_part = html.unescape(clean_part)
+                            story.append(Paragraph(clean_part, style))
+                        except Exception as e2:
+                            logger.warning(f"Fallback paragraph for invalid math failed: {e2}")
+                            # Use preformatted text
+                            try:
+                                story.append(Preformatted(part, self.styles.get("Code", style)))
+                            except Exception as e3:
+                                logger.warning(f"Preformatted text for invalid math failed: {e3}")
+                                continue
                     continue
                     
                 # Try to render math expression
@@ -1156,11 +1298,47 @@ class PDFCreator:
                     # Fallback to text if math rendering fails
                     # Apply LaTeX symbol conversion to the expression as well
                     converted_expr = self._convert_latex_symbols(expr)
-                    story.append(Paragraph(f"[Math: {converted_expr}]", style))
+                    try:
+                        story.append(Paragraph(f"[Math: {converted_expr}]", style))
+                    except Exception as e:
+                        logger.warning(f"Failed to create math fallback paragraph: {e}")
+                        try:
+                            # Clean the math expression and try again
+                            clean_expr = re.sub(r'<[^>]*>', '', converted_expr)
+                            clean_expr = html.unescape(clean_expr)
+                            story.append(Paragraph(f"[Math: {clean_expr}]", style))
+                        except Exception as e2:
+                            logger.warning(f"Math fallback paragraph creation failed: {e2}")
+                            # Use preformatted text for math expressions that can't be rendered
+                            try:
+                                story.append(Preformatted(f"[Math: {expr}]", self.styles.get("Code", style)))
+                            except Exception as e3:
+                                logger.warning(f"Math preformatted text creation failed: {e3}")
+                                # Skip problematic math content
+                                continue
             else:
                 # Regular text - make sure it's clean
                 if part.strip():
-                    story.append(Paragraph(part, style))
+                    try:
+                        story.append(Paragraph(part, style))
+                    except Exception as e:
+                        logger.warning(f"Failed to create paragraph for text part: {e}")
+                        logger.warning(f"Problematic text part: {part[:100]}...")
+                        try:
+                            # Try with sanitized content
+                            clean_part = re.sub(r'<[^>]*>', '', part)
+                            clean_part = html.unescape(clean_part)
+                            clean_part = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', clean_part)  # Remove control characters
+                            story.append(Paragraph(clean_part, style))
+                        except Exception as e2:
+                            logger.warning(f"Fallback paragraph creation failed: {e2}")
+                            # Use preformatted text as last resort
+                            try:
+                                story.append(Preformatted(part, self.styles.get("Code", style)))
+                            except Exception as e3:
+                                logger.warning(f"Preformatted text creation failed: {e3}")
+                                # Skip problematic content rather than crash
+                                story.append(Paragraph("[Text content could not be rendered]", style))
         
         # Add spacing after the whole block
         story.append(Spacer(1, 4))
@@ -1531,7 +1709,7 @@ class PDFCreator:
             url = problem.get("url", "").strip()
             
             # Ensure required fields exist
-            problem.setdefault("scrape_date", datetime.utcnow().isoformat())
+            problem.setdefault("scrape_date", datetime.now(timezone.utc).isoformat())
             scrape_date = problem.get("scrape_date") or datetime.utcnow().isoformat()
             problem.setdefault("scrape_date", scrape_date)
             
@@ -1656,7 +1834,7 @@ class PDFCreator:
                     story.append(Spacer(1, 24))
                     story.append(
                         Paragraph(
-                            f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+                            f"Generated on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC",
                             self.styles["ProblemText"],
                         )
                     )
@@ -1780,7 +1958,7 @@ class PDFCreator:
         story.append(Spacer(1, 24))
         story.append(
             Paragraph(
-                f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+                f"Generated on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC",
                 self.styles["ProblemText"],
             )
         )

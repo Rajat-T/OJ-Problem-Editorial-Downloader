@@ -74,7 +74,9 @@ class SPOJScraper(BaseScraper):
             container = self._find_statement_container(soup)
             for tag in container.find_all(["script", "style"]):
                 tag.decompose()
-            problem_statement = container.get_text("\n", strip=True)
+
+            # Retain the original HTML structure for rendering
+            problem_statement_html = str(container)
 
             # Sections ------------------------------------------------------
             input_format = ""
@@ -144,7 +146,7 @@ class SPOJScraper(BaseScraper):
 
             result = self.create_standard_format(
                 title=title,
-                problem_statement=problem_statement,
+                problem_statement=problem_statement_html,  # Pass HTML content
                 input_format=input_format,
                 output_format=output_format,
                 constraints=constraints,

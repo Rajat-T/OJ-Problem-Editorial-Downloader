@@ -139,7 +139,8 @@ class AtCoderScraper(BaseScraper):
                                statement_elem)
                     
                     if lang_div:
-                        result.update(self._extract_problem_sections(lang_div, url))
+                        # Retain the original HTML structure for rendering
+                        result['problem_statement'] = str(lang_div)
                     else:
                         logger.warning(f"No language-specific content found for {url}")
                 else:

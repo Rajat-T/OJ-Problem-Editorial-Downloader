@@ -31,31 +31,56 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 import requests
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import (
-    WebDriverException, TimeoutException, NoSuchElementException,
-    ElementNotInteractableException, SessionNotCreatedException
-)
-from webdriver_manager.chrome import ChromeDriverManager
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import (
+        WebDriverException, TimeoutException, NoSuchElementException,
+        ElementNotInteractableException, SessionNotCreatedException
+    )
+    from webdriver_manager.chrome import ChromeDriverManager
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    SELENIUM_AVAILABLE = False
+    webdriver = None
+    Service = None
+    Options = None
+    By = None
+    WebDriverWait = None
+    EC = None
+    WebDriverException = Exception
+    TimeoutException = Exception
+    NoSuchElementException = Exception
+    ElementNotInteractableException = Exception
+    SessionNotCreatedException = Exception
+    ChromeDriverManager = None
 import time
 import logging
 import re
 import socket
 import signal
 from urllib.parse import urlparse, urljoin
-from PIL import Image
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    Image = None
 import io
 import base64
 from requests.exceptions import (
     RequestException, Timeout, ConnectionError, HTTPError, 
     TooManyRedirects, InvalidURL, ChunkedEncodingError
 )
-from urllib3.exceptions import MaxRetryError, NewConnectionError
+try:
+    from urllib3.exceptions import MaxRetryError, NewConnectionError
+except ImportError:
+    MaxRetryError = Exception
+    NewConnectionError = Exception
 
 # Import our error handling module
 from utils.error_handler import (
@@ -168,14 +193,18 @@ class BaseScraper(ABC):
         
         # Configure session timeouts and retries
         from requests.adapters import HTTPAdapter
-        from urllib3.util.retry import Retry
-        
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "OPTIONS"]
-        )
+        try:
+            from urllib3.util.retry import Retry
+            
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=1,
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=["HEAD", "GET", "OPTIONS"]
+            )
+        except ImportError:
+            # Fallback if urllib3 is not available
+            retry_strategy = None
         
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("http://", adapter)
@@ -481,7 +510,20 @@ class BaseScraper(ABC):
     def _should_exclude_image(self, img_tag, src: str) -> bool:
         """
         Determine if an image should be excluded from PDF generation.
-        This filters out language flags, decorative icons, and other unwanted images.
+        Enhanced filtering specifically for competitive programming platforms.
+        
+        This filters out:
+        - Language flags and selectors
+        - UI elements (navigation, buttons, logos)
+        - Decorative icons and sprites
+        - Advertisement and social media images
+        - Placeholder and spacer images
+        
+        While preserving:
+        - Problem diagrams and illustrations
+        - Mathematical figures and graphs
+        - Sample input/output visualizations
+        - Algorithm flowcharts and data structures
         
         Args:
             img_tag: BeautifulSoup img tag
@@ -491,90 +533,182 @@ class BaseScraper(ABC):
             bool: True if the image should be excluded
         """
         try:
-            # Get image attributes for analysis
+            # Get image attributes for comprehensive analysis
             alt_text = (img_tag.get('alt', '') or '').lower()
             title_text = (img_tag.get('title', '') or '').lower()
             class_names = ' '.join(img_tag.get('class', [])).lower()
+            id_attr = (img_tag.get('id', '') or '').lower()
             src_lower = src.lower()
             
-            # Flag image patterns (common language indicators)
-            flag_patterns = [
-                'flag', 'lang', 'language', 'jp.png', 'en.png', 'ja.png',
-                'japan', 'british', 'english', 'japanese', 'uk.png', 'gb.png'
+            # Enhanced language flag detection
+            # Common patterns across competitive programming sites
+            language_patterns = [
+                # File name patterns
+                'flag', 'lang', 'language', 'jp.png', 'en.png', 'ja.png', 'gb.png',
+                'uk.png', 'us.png', 'cn.png', 'kr.png', 'ru.png',
+                # Directory patterns
+                '/lang/', '/flag/', '/languages/', '/flags/', '/img/lang/',
+                '/images/lang/', '/static/lang/', '/assets/lang/',
+                # Alt text patterns
+                'japanese', 'english', 'language', 'flag', 'japan', 'britain',
+                'united kingdom', 'united states', 'china', 'korea', 'russia'
             ]
             
-            # Check if image is a language flag
-            for pattern in flag_patterns:
+            # Check language flag patterns
+            for pattern in language_patterns:
                 if (pattern in src_lower or 
                     pattern in alt_text or 
                     pattern in title_text or
                     pattern in class_names):
-                    logger.debug(f"Excluding flag/language image: {src} (matched pattern: {pattern})")
+                    logger.debug(f"Excluding language flag: {src} (pattern: {pattern})")
                     return True
             
-            # Small decorative images (likely icons)
+            # Size-based filtering for icons and decorative elements
             width = img_tag.get('width')
             height = img_tag.get('height')
             try:
                 if width and height:
                     w, h = int(width), int(height)
-                    # Exclude very small images (likely icons/flags)
+                    # Exclude very small images (icons, flags, buttons)
                     if w <= 32 and h <= 32:
-                        logger.debug(f"Excluding small decorative image: {src} ({w}x{h})")
+                        logger.debug(f"Excluding small icon: {src} ({w}x{h})")
+                        return True
+                    # Exclude 1x1 pixel trackers and spacers
+                    if w == 1 or h == 1:
+                        logger.debug(f"Excluding pixel tracker/spacer: {src} ({w}x{h})")
                         return True
             except (ValueError, TypeError):
                 pass
             
-            # AtCoder specific patterns
+            # Platform-specific exclusion patterns
+            # AtCoder specific filtering
             if 'atcoder.jp' in src_lower:
-                atcoder_exclude_patterns = [
-                    '/img/lang/', '/images/lang/', '/static/lang/',
-                    'language-selector', 'lang-', '_lang_', 'flag_',
-                    '/common/img/', '/img/flag/', '/images/flag/'
+                atcoder_patterns = [
+                    '/img/lang/', '/images/lang/', '/static/lang/', '/assets/lang/',
+                    'language-selector', 'lang-', '_lang_', 'flag_', '/common/img/',
+                    '/img/flag/', '/images/flag/', '/static/flag/', '/navbar/',
+                    '/header/', '/footer/', '/logo/', 'atcoder_logo', 'rating_',
+                    'difficulty_', '/contest/', 'user_icon', 'avatar'
                 ]
                 
-                for pattern in atcoder_exclude_patterns:
+                for pattern in atcoder_patterns:
                     if pattern in src_lower:
-                        logger.debug(f"Excluding AtCoder language/flag image: {src} (matched pattern: {pattern})")
+                        logger.debug(f"Excluding AtCoder UI element: {src} (pattern: {pattern})")
                         return True
             
-            # Navigation and UI elements
-            ui_patterns = [
-                'nav', 'menu', 'button', 'icon', 'logo', 'banner',
-                'header', 'footer', 'sidebar', 'advertisement', 'ad',
-                'social', 'share', 'twitter', 'facebook', 'github'
+            # Codeforces specific filtering
+            elif 'codeforces.com' in src_lower or 'codeforces.ru' in src_lower:
+                codeforces_patterns = [
+                    '/images/flags/', '/img/flags/', 'flag_', 'country_', 
+                    '/images/icons/', 'icon_', 'logo_', '/header/', '/footer/',
+                    'rating_', 'rank_', 'social_', 'sponsor_', 'advertisement',
+                    'telegram', 'vk_icon', 'facebook_icon', 'twitter_icon'
+                ]
+                
+                for pattern in codeforces_patterns:
+                    if pattern in src_lower:
+                        logger.debug(f"Excluding Codeforces UI element: {src} (pattern: {pattern})")
+                        return True
+            
+            # SPOJ specific filtering  
+            elif 'spoj.com' in src_lower:
+                spoj_patterns = [
+                    '/gfx/flags/', '/images/flags/', 'flag_', '/gfx/icons/',
+                    'sphere_logo', 'spoj_logo', '/header/', '/footer/',
+                    'navigation', 'menu_', 'social_', 'google_ads'
+                ]
+                
+                for pattern in spoj_patterns:
+                    if pattern in src_lower:
+                        logger.debug(f"Excluding SPOJ UI element: {src} (pattern: {pattern})")
+                        return True
+            
+            # Generic UI and navigation elements
+            ui_navigation_patterns = [
+                # Navigation and menus
+                'nav', 'menu', 'navigation', 'navbar', 'sidebar', 'breadcrumb',
+                'dropdown', 'hamburger', 'mobile-menu',
+                # Buttons and controls
+                'button', 'btn', 'submit', 'search', 'close', 'expand', 'collapse',
+                # Branding and logos
+                'logo', 'brand', 'header', 'footer', 'banner', 'masthead',
+                # Social media and sharing
+                'social', 'share', 'twitter', 'facebook', 'github', 'linkedin',
+                'youtube', 'instagram', 'telegram', 'discord',
+                # Advertisement and tracking
+                'advertisement', 'ads', 'google-ads', 'adsense', 'sponsor',
+                'tracking', 'analytics', 'pixel',
+                # User interface elements
+                'avatar', 'profile', 'user-icon', 'thumbnail', 'preview'
             ]
             
-            for pattern in ui_patterns:
+            # Check UI patterns in various attributes
+            for pattern in ui_navigation_patterns:
                 if (pattern in src_lower or 
                     pattern in alt_text or 
-                    pattern in class_names):
-                    logger.debug(f"Excluding UI/navigation image: {src} (matched pattern: {pattern})")
+                    pattern in class_names or
+                    pattern in id_attr or
+                    pattern in title_text):
+                    logger.debug(f"Excluding UI element: {src} (pattern: {pattern})")
                     return True
             
-            # Common icon file patterns
-            icon_patterns = [
-                '.ico', 'favicon', 'sprite', 'thumb', 'avatar',
-                '_icon', '-icon', 'icon_', 'icon-'
+            # File type and path-based exclusions
+            file_path_patterns = [
+                # Icon directories
+                '/icons/', '/icon/', '/img/icons/', '/images/icons/', '/assets/icons/',
+                # UI directories
+                '/ui/', '/interface/', '/controls/', '/buttons/',
+                # Common icon files
+                'favicon', 'sprite', 'thumb', 'avatar', '_icon', '-icon', 'icon_', 'icon-',
+                # Placeholder and spacer images
+                'placeholder', 'blank', 'empty', 'spacer', 'transparent', 'pixel',
+                # Decorative elements
+                'decoration', 'ornament', 'border', 'background', 'texture'
             ]
             
-            for pattern in icon_patterns:
+            for pattern in file_path_patterns:
                 if pattern in src_lower:
-                    logger.debug(f"Excluding icon image: {src} (matched pattern: {pattern})")
+                    logger.debug(f"Excluding file path pattern: {src} (pattern: {pattern})")
                     return True
             
-            # Empty or placeholder images
-            if (not alt_text.strip() and not title_text.strip() and 
-                ('placeholder' in src_lower or 'blank' in src_lower or 
-                 'empty' in src_lower or 'spacer' in src_lower)):
-                logger.debug(f"Excluding placeholder image: {src}")
+            # Content preservation logic - keep these images
+            # Mathematical and algorithmic content indicators
+            content_indicators = [
+                'diagram', 'graph', 'chart', 'figure', 'illustration', 'example',
+                'sample', 'input', 'output', 'algorithm', 'flowchart', 'tree',
+                'network', 'grid', 'matrix', 'visualization', 'drawing',
+                'problem', 'solution', 'explanation', 'tutorial', 'math',
+                'formula', 'equation', 'proof', 'geometric', 'coordinate'
+            ]
+            
+            # If image has content indicators, prefer to include it
+            for indicator in content_indicators:
+                if (indicator in alt_text or 
+                    indicator in title_text or
+                    indicator in src_lower):
+                    logger.debug(f"Preserving content image: {src} (indicator: {indicator})")
+                    return False
+            
+            # Base64 embedded images - usually small decorative elements
+            if src.startswith('data:image/'):
+                # Allow mathematical expressions but exclude decorative elements
+                if len(src) < 1000:  # Small base64 images are likely decorative
+                    logger.debug(f"Excluding small base64 image: {src[:100]}...")
+                    return True
+            
+            # Images without meaningful alt text or title that are likely decorative
+            if (not alt_text.strip() and 
+                not title_text.strip() and 
+                any(pattern in src_lower for pattern in ['spacer', 'blank', 'pixel', 'transparent'])):
+                logger.debug(f"Excluding decorative image with no alt text: {src}")
                 return True
             
+            # Default: include the image if no exclusion criteria met
             return False
             
         except Exception as e:
-            logger.warning(f"Error in image exclusion check for {src}: {e}")
-            # On error, include the image to avoid losing content
+            logger.warning(f"Error in image exclusion analysis for {src}: {e}")
+            # On error, include the image to avoid losing potentially important content
             return False
     
     def _get_image_format(self, url: str) -> str:

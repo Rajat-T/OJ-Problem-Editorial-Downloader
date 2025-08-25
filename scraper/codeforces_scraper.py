@@ -196,7 +196,8 @@ class CodeforcesScraper(BaseScraper):
                 if elem:
                     elem.decompose()
 
-            problem_statement = statement_elem.get_text("\n", strip=True)
+            # Retain the original HTML structure for rendering
+            problem_statement_html = str(statement_elem)
 
             # Sample tests
             examples: List[Dict[str, str]] = []
@@ -215,7 +216,7 @@ class CodeforcesScraper(BaseScraper):
 
             return self.create_standard_format(
                 title=title,
-                problem_statement=problem_statement,
+                problem_statement=problem_statement_html,  # Pass HTML content
                 input_format=input_format,
                 output_format=output_format,
                 constraints=constraints,

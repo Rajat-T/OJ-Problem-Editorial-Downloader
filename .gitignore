@@ -50,6 +50,18 @@ temp/
 *.jpg
 *.jpeg
 
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.tox/
+
 # Test files
 test_output/
 *_test.pdf
