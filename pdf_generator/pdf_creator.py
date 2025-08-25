@@ -825,6 +825,14 @@ class PDFCreator:
             text = text.replace(entity, replacement)
         
         # Fix common patterns from competitive programming problems
+        # Handle case subscripts properly
+        text = re.sub(r'\bcase([0-9]+)\b', r'case_\1', text)  # case1 → case_1
+        text = re.sub(r'\boutput([0-9]+)\b', r'output_\1', text)  # output1 → output_1
+        text = re.sub(r'\binput([0-9]+)\b', r'input_\1', text)  # input1 → input_1
+        
+        # Handle variable subscripts  
+        text = re.sub(r'\b([A-Za-z])([0-9]+)\b', r'\1_\2', text)  # A1 → A_1 (but only standalone)
+        
         # First handle patterns where letters get concatenated incorrectly
         # Be more specific to avoid false positives
         text = re.sub(r'\b([a-z]+)n([A-Z])n\b', r'\1_\2', text)  # casenTn → case_T
@@ -835,9 +843,10 @@ class PDFCreator:
         # Pattern: word_number_ → word_number (remove trailing underscore)
         text = re.sub(r'([a-zA-Z]+)_([0-9]+)_', r'\1_\2', text)
         
+        # For PDF compatibility, use bracket notation for subscripts
         # Pattern: Letter_X_ → Letter[X] for better PDF compatibility
-        text = re.sub(r'([A-Za-z])_([0-9]+)_', r'\1[\2]', text)
-        text = re.sub(r'([A-Za-z])_([a-zA-Z])_', r'\1[\2]', text)
+        text = re.sub(r'\b([A-Za-z]+)_([0-9]+)\b', r'\1[\2]', text)  # case_1 → case[1]
+        text = re.sub(r'\b([A-Za-z])_([a-zA-Z])\b', r'\1[\2]', text)  # A_i → A[i]
         
         # Pattern: standalone _X_ → [X] (but not for words)
         text = re.sub(r'\b_([0-9]+)_\b', r'[\1]', text)
@@ -874,8 +883,135 @@ class PDFCreator:
         
         return text
 
+    def _process_text_content(self, text: str) -> List[str]:
+        """Process text content to handle line breaks and formatting exactly like the original website."""
+        if not text:
+            return []
+        
+        # Clean up the text first
+        text = text.strip()
+        
+        # Split the text into lines and analyze each line
+        lines = text.split('\n')
+        
+        # Clean and filter lines
+        clean_lines = []
+        for line in lines:
+            line = line.strip()
+            if line:  # Only keep non-empty lines
+                clean_lines.append(line)
+        
+        if not clean_lines:
+            return []
+        
+        # If we have very few lines, just return them as separate paragraphs
+        if len(clean_lines) <= 3:
+            return clean_lines
+        
+        # Advanced processing for complex content
+        paragraphs = []
+        current_paragraph = []
+        
+        i = 0
+        while i < len(clean_lines):
+            line = clean_lines[i]
+            
+            # Check if this line should be its own paragraph
+            is_standalone = (
+                # Format indicators
+                line.lower().endswith(':') or
+                line.lower().startswith('the input is given') or
+                line.lower().startswith('output the answers') or
+                line.lower().startswith('each case is given') or
+                line.lower().startswith('here,') or
+                # Single variables or short format lines
+                re.match(r'^[A-Z]$', line.strip()) or  # Single letter like 'T'
+                re.match(r'^[a-z]+[0-9]+$', line.strip()) or  # case1, output1
+                re.match(r'^[a-z]+[A-Z]$', line.strip()) or  # caseT, outputT
+                line.strip() in [':', '...', '⋮'] or
+                # Mathematical or symbolic lines
+                len(line.split()) == 1 and line.strip() in ['T', 'H', 'W', 'L', 'N', 'M', 'r', 'c']
+            )
+            
+            # Check if this starts a format specification block
+            is_format_start = any(indicator in line.lower() for indicator in [
+                'following format:', 'given from standard input', 'answers in the following'
+            ])
+            
+            if is_format_start:
+                # Finish current paragraph
+                if current_paragraph:
+                    paragraphs.append(' '.join(current_paragraph))
+                    current_paragraph = []
+                
+                # Add the format description line
+                paragraphs.append(line)
+                
+                # Look ahead for format specification lines
+                j = i + 1
+                format_lines = []
+                while j < len(clean_lines):
+                    next_line = clean_lines[j]
+                    # Check if this looks like a format specification
+                    if (len(next_line.split()) <= 6 and  # Short lines
+                        (re.match(r'^[A-Z]+[0-9]*$', next_line.strip()) or  # T, case1, etc.
+                         next_line.strip() in [':', '...', '⋮'] or
+                         re.match(r'^[a-z]+[0-9]+$', next_line.strip()) or  # case1, output1
+                         re.match(r'^[a-z]+[A-Z]$', next_line.strip()))):
+                        format_lines.append(next_line)
+                        j += 1
+                    else:
+                        break
+                
+                # Add format lines as a single code block content
+                if format_lines:
+                    paragraphs.append('FORMAT_BLOCK:' + '\n'.join(format_lines))
+                    i = j - 1  # Continue from where we left off
+                
+            elif is_standalone:
+                # Finish current paragraph
+                if current_paragraph:
+                    paragraphs.append(' '.join(current_paragraph))
+                    current_paragraph = []
+                
+                # Add this line as its own paragraph
+                paragraphs.append(line)
+                
+            else:
+                # Check if this line should start a new paragraph based on content change
+                should_break = (
+                    current_paragraph and  # We have existing content
+                    (len(current_paragraph) >= 2 or  # Current paragraph is getting long
+                     (line.lower().startswith(('for each', 'more precisely', 'note that', 
+                                              'if it is', 'let (', 'output integer')) and
+                      len(current_paragraph) >= 1))  # Semantic break indicators
+                )
+                
+                if should_break:
+                    # Finish current paragraph
+                    paragraphs.append(' '.join(current_paragraph))
+                    current_paragraph = [line]
+                else:
+                    # Add to current paragraph
+                    current_paragraph.append(line)
+            
+            i += 1
+        
+        # Don't forget the last paragraph
+        if current_paragraph:
+            paragraphs.append(' '.join(current_paragraph))
+        
+        # Clean up and validate paragraphs
+        result = []
+        for paragraph in paragraphs:
+            paragraph = paragraph.strip()
+            if paragraph:
+                result.append(paragraph)
+        
+        return result
+
     def _add_text_with_math(self, story: List[Any], text: str, style: ParagraphStyle) -> None:
-        """Add text to the story while rendering math blocks.
+        """Add text to the story while rendering math blocks and handling format blocks.
 
         The function looks for ``$...$`` or ``$$...$$`` patterns.  Pieces of plain text
         are appended as :class:`Paragraph` objects, while the expressions
@@ -883,6 +1019,15 @@ class PDFCreator:
         images.  This keeps the surrounding text searchable and
         copy-able whilst still allowing mathematical notation.
         """
+        
+        # Check if this is a format block
+        if text.startswith('FORMAT_BLOCK:'):
+            format_content = text[13:]  # Remove 'FORMAT_BLOCK:' prefix
+            # Render as code block with better formatting
+            story.append(Spacer(1, 6))
+            story.append(self._highlight_code(format_content, language="text"))
+            story.append(Spacer(1, 6))
+            return
         
         # First convert LaTeX symbols to Unicode or proper format
         text = self._convert_latex_symbols(text)
@@ -896,8 +1041,38 @@ class PDFCreator:
         text = re.sub(r'([A-Za-z])_(\d+)', r'\1[\2]', text)  # A_1 -> A[1]
         text = re.sub(r'([A-Za-z])_([a-zA-Z])', r'\1[\2]', text)  # A_i -> A[i]
         
+        # Check if this is a single line that should be formatted specially
+        is_single_variable = re.match(r'^[A-Z]$', text.strip())  # Single letters like 'T'
+        is_format_line = (len(text.split()) <= 3 and 
+                         (re.match(r'^[a-z]+[0-9]+$', text.strip()) or  # case1, output1
+                          re.match(r'^[a-z]+[A-Z]$', text.strip()) or   # caseT, outputT
+                          text.strip() in [':', '...', '⋮']))
+        
+        if is_single_variable or is_format_line:
+            # Format as a centered, code-like element
+            story.append(Spacer(1, 3))
+            code_style = ParagraphStyle(
+                name='FormatVariable',
+                parent=self.styles['Code'],
+                alignment=1,  # Center alignment
+                fontSize=self.base_font_size + 1,
+                spaceBefore=3,
+                spaceAfter=3,
+            )
+            story.append(Paragraph(text, code_style))
+            story.append(Spacer(1, 3))
+            return
+        
         pattern = re.compile(r"(\$\$?[^$]+\$\$?)")  # Match both $...$ and $$...$$
         parts = pattern.split(text)
+        
+        # If no math expressions, just add as paragraph with proper spacing
+        if len(parts) == 1:
+            story.append(Paragraph(text, style))
+            story.append(Spacer(1, 4))  # Add consistent spacing between paragraphs
+            return
+        
+        # Process text with math expressions
         for part in parts:
             if not part:
                 continue
@@ -948,7 +1123,9 @@ class PDFCreator:
                 clean_text = self._improve_text_formatting(clean_text)
                 if clean_text.strip():
                     story.append(Paragraph(clean_text, style))
-
+        
+        # Add spacing after the whole block
+        story.append(Spacer(1, 4))
     def _add_heading(
         self,
         story: List[Any],
@@ -1078,18 +1255,105 @@ class PDFCreator:
         # Use the correct field names that come from the scrapers
         statement = data.get("problem_statement") or data.get("statement") or data.get("content") or ""
         if statement:
-            for paragraph in statement.split("\n\n"):
-                self._add_text_with_math(section, paragraph.strip(), self.styles["ProblemText"])
+            # Use the new text processing method for better formatting
+            paragraphs = self._process_text_content(statement)
+            
+            for paragraph in paragraphs:
+                self._add_text_with_math(section, paragraph, self.styles["ProblemText"])
 
         input_spec = data.get("input_format") or data.get("input_specification") or ""
         if input_spec:
             self._add_heading(section, "Input", 1)
-            self._add_text_with_math(section, input_spec, self.styles["ProblemText"])
+            # Check if this looks like a code block format
+            if any(keyword in input_spec.lower() for keyword in ["format:", "given from", "following format"]):
+                # Split description and format examples
+                lines = [line.strip() for line in input_spec.split("\n") if line.strip()]
+                format_started = False
+                description_lines = []
+                format_lines = []
+                
+                for line in lines:
+                    # Look for format indicators
+                    if any(indicator in line.lower() for indicator in ["format:", "given from", "following format"]):
+                        format_started = True
+                        description_lines.append(line)
+                    elif format_started and (line.startswith(" ") or 
+                                            len(line.split()) <= 5 or  # Short lines are likely format
+                                            re.match(r'^[A-Z_][0-9]*$', line.strip()) or  # Variables like T, N, case1
+                                            ':' in line or  # Lines with colons like ":" 
+                                            line.strip() in ['...', ':', '⋮']):
+                        # This looks like a format specification
+                        format_lines.append(line)
+                    else:
+                        if format_started and format_lines:
+                            # We've moved past the format section
+                            format_started = False
+                        description_lines.append(line)
+                
+                # Add description
+                if description_lines:
+                    description = "\n".join(description_lines)
+                    paragraphs = self._process_text_content(description)
+                    for paragraph in paragraphs:
+                        self._add_text_with_math(section, paragraph, self.styles["ProblemText"])
+                
+                # Add format as code block
+                if format_lines:
+                    format_text = "\n".join(format_lines)
+                    section.append(self._highlight_code(format_text, language="text"))
+            else:
+                # Regular text processing
+                paragraphs = self._process_text_content(input_spec)
+                
+                for paragraph in paragraphs:
+                    self._add_text_with_math(section, paragraph, self.styles["ProblemText"])
 
         output_spec = data.get("output_format") or data.get("output_specification") or ""
         if output_spec:
             self._add_heading(section, "Output", 1)
-            self._add_text_with_math(section, output_spec, self.styles["ProblemText"])
+            # Check if this looks like a code block format
+            if any(keyword in output_spec.lower() for keyword in ["format:", "answers in", "following format"]):
+                # Split description and format examples
+                lines = [line.strip() for line in output_spec.split("\n") if line.strip()]
+                format_started = False
+                description_lines = []
+                format_lines = []
+                
+                for line in lines:
+                    # Look for format indicators
+                    if any(indicator in line.lower() for indicator in ["format:", "answers in", "following format"]):
+                        format_started = True
+                        description_lines.append(line)
+                    elif format_started and (line.startswith(" ") or 
+                                            len(line.split()) <= 5 or  # Short lines are likely format
+                                            re.match(r'^[A-Z_][0-9]*$', line.strip()) or  # Variables like output1, outputT
+                                            ':' in line or  # Lines with colons like ":" 
+                                            line.strip() in ['...', ':', '⋮']):
+                        # This looks like a format specification
+                        format_lines.append(line)
+                    else:
+                        if format_started and format_lines:
+                            # We've moved past the format section
+                            format_started = False
+                        description_lines.append(line)
+                
+                # Add description
+                if description_lines:
+                    description = "\n".join(description_lines)
+                    paragraphs = self._process_text_content(description)
+                    for paragraph in paragraphs:
+                        self._add_text_with_math(section, paragraph, self.styles["ProblemText"])
+                
+                # Add format as code block
+                if format_lines:
+                    format_text = "\n".join(format_lines)
+                    section.append(self._highlight_code(format_text, language="text"))
+            else:
+                # Regular text processing
+                paragraphs = self._process_text_content(output_spec)
+                
+                for paragraph in paragraphs:
+                    self._add_text_with_math(section, paragraph, self.styles["ProblemText"])
 
         constraints = data.get("constraints") or ""
         constraints_table = data.get("constraints_table")
