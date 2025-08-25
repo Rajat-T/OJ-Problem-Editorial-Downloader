@@ -883,14 +883,29 @@ class PDFCreator:
         
         return text
 
-    def _process_text_content(self, text: str) -> List[str]:
-        """Split text into paragraphs while preserving line breaks."""
+    def _process_text_content(self, text: str, preserve_lines: bool = False) -> List[str]:
+        """Split text into paragraphs and optionally preserve single line breaks.
+
+        Parameters
+        ----------
+        text:
+            Raw text content that may contain embedded newline characters.
+        preserve_lines:
+            If ``True`` single newlines are retained inside paragraphs.  When
+            ``False`` (the default) single newlines are converted to spaces so
+            that paragraphs flow naturally, matching the formatting on the
+            original problem webpage.
+        """
         if not text:
             return []
 
         text = text.strip()
 
-        # Split paragraphs on double newlines, keep single newlines inside paragraphs
+        if not preserve_lines:
+            # Replace single newlines with spaces while keeping paragraph breaks
+            text = re.sub(r'(?<!\n)\n(?!\n)', ' ', text)
+
+        # Split paragraphs on double newlines
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
         return paragraphs
 
