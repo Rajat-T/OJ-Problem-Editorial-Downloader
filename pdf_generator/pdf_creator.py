@@ -17,6 +17,10 @@ Key features implemented:
 * Automatic table of contents generation.
 * PDF metadata (source, url, scrape date …).
 * Page headers and footers with page numbers.
+* Syntax highlighted code snippets via ``pygments``.
+* Table rendering for summaries, constraints and examples.
+* Bookmarks for easy navigation and separate sections for problems and editorials.
+* Configurable base font and size with a dedicated summary page.
 
 The implementation relies solely on `reportlab` which is already a
 dependency of the project.  Optional rendering of mathematics requires
@@ -32,7 +36,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import requests
 from PIL import Image
@@ -48,8 +52,13 @@ from reportlab.platypus import (
     Preformatted,
     SimpleDocTemplate,
     Spacer,
+    Table,
     TableOfContents,
+    TableStyle,
 )
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import get_lexer_by_name, guess_lexer
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +92,24 @@ class PDFCreator:
     output_dir:
         Directory where generated files are saved.  Missing directories
         are created automatically.
+    base_font_size:
+        Base font size used for normal paragraph text.  Heading and code
+        block sizes are derived from this value.
+    body_font:
+        Name of the font used for regular text.
     """
 
-    def __init__(self, output_dir: str = "output") -> None:
+    def __init__(
+        self,
+        output_dir: str = "output",
+        base_font_size: int = 11,
+        body_font: str = "Helvetica",
+    ) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.base_font_size = base_font_size
+        self.body_font = body_font
 
         # Styles used throughout the document
         self.styles = getSampleStyleSheet()
@@ -137,16 +159,17 @@ class PDFCreator:
             )
         )
 
+        code_size = max(6, self.base_font_size - 1)
         self.styles.add(
             ParagraphStyle(
                 name="Code",
                 parent=self.styles["Normal"],
                 fontName="Courier",
-                fontSize=10,
+                fontSize=code_size,
                 backColor=colors.whitesmoke,
                 leftIndent=6,
                 rightIndent=6,
-                leading=12,
+                leading=code_size + 2,
                 spaceAfter=6,
             )
         )
@@ -156,8 +179,9 @@ class PDFCreator:
                 name="ProblemText",
                 parent=self.styles["Normal"],
                 alignment=TA_JUSTIFY,
-                fontSize=11,
-                leading=14,
+                fontName=self.body_font,
+                fontSize=self.base_font_size,
+                leading=self.base_font_size + 3,
                 spaceAfter=6,
             )
         )
@@ -258,11 +282,19 @@ class PDFCreator:
             else:
                 story.append(Paragraph(part, style))
 
-    def _add_heading(self, story: List[Any], text: str, level: int = 0) -> None:
+    def _add_heading(
+        self,
+        story: List[Any],
+        text: str,
+        level: int = 0,
+        page_break_before: bool = False,
+    ) -> None:
         """Create a heading paragraph and register it for the TOC."""
 
         style_name = "Heading1" if level == 0 else "Heading2"
         para = Paragraph(text, self.styles[style_name])
+        if page_break_before:
+            para.__dict__["pageBreakBefore"] = True
         bookmark = re.sub(r"[^a-zA-Z0-9]+", "_", text) + f"_{level}"
         para._bookmarkName = bookmark
         para._headingText = text
@@ -293,11 +325,140 @@ class PDFCreator:
                 Paragraph(f"Figure {self._figure_counter}: {caption}", self.styles["ImageCaption"])
             )
 
+    def _add_table(self, story: List[Any], data: Sequence[Sequence[str]]) -> None:
+        """Add a simple table to the story."""
+
+        tbl = Table(data, hAlign="LEFT")
+        tbl.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                ]
+            )
+        )
+        story.append(tbl)
+
+    def _highlight_code(self, code: str, language: Optional[str] = None) -> Any:
+        """Return a flowable with syntax highlighted code.
+
+        The implementation uses :mod:`pygments` with inline styling so the
+        resulting text remains selectable and searchable in the PDF.  When
+        highlighting fails the raw code is inserted instead.
+        """
+
+        try:
+            lexer = get_lexer_by_name(language) if language else guess_lexer(code)
+            formatter = HtmlFormatter(nowrap=True, noclasses=True)
+            highlighted = highlight(code, lexer, formatter)
+            highlighted = highlighted.replace("<span style=\"", "<font ")
+            highlighted = highlighted.replace("color: ", "color=")
+            highlighted = highlighted.replace(";\">", ">")
+            highlighted = highlighted.replace("</span>", "</font>")
+            highlighted = highlighted.replace(" ", "&nbsp;").replace("\n", "<br/>")
+            return Paragraph(highlighted, self.styles["Code"])
+        except Exception:
+            return Preformatted(code, self.styles["Code"])
+
+    def _add_summary(self, story: List[Any], data: Dict[str, Any], page_break: bool = False) -> None:
+        """Insert a summary table with problem metadata."""
+
+        tags = data.get("tags")
+        if isinstance(tags, (list, tuple)):
+            tags = ", ".join(tags)
+        summary_data = [
+            ["Title", data.get("title", "")],
+            ["Source", data.get("platform", "")],
+            ["URL", data.get("url", "")],
+            ["Difficulty", data.get("difficulty", "")],
+            ["Tags", tags or ""],
+            ["Scraped on", data.get("scrape_date", "")],
+        ]
+        self._add_heading(story, "Summary", 0, page_break_before=page_break)
+        self._add_table(story, summary_data)
+
+    def _build_content_story(self, data: Dict[str, Any], section_title: str) -> List[Any]:
+        """Build the story for either the problem or editorial section."""
+
+        section: List[Any] = []
+        self._add_heading(section, section_title, 0, page_break_before=True)
+
+        statement = data.get("statement") or data.get("content") or ""
+        if statement:
+            for paragraph in statement.split("\n\n"):
+                self._add_text_with_math(section, paragraph.strip(), self.styles["ProblemText"])
+
+        input_spec = data.get("input_specification") or data.get("input_format") or ""
+        if input_spec:
+            self._add_heading(section, "Input", 1)
+            self._add_text_with_math(section, input_spec, self.styles["ProblemText"])
+
+        output_spec = data.get("output_specification") or data.get("output_format") or ""
+        if output_spec:
+            self._add_heading(section, "Output", 1)
+            self._add_text_with_math(section, output_spec, self.styles["ProblemText"])
+
+        constraints = data.get("constraints") or ""
+        constraints_table = data.get("constraints_table")
+        if constraints_table:
+            self._add_heading(section, "Constraints", 1)
+            self._add_table(section, constraints_table)
+        elif constraints:
+            self._add_heading(section, "Constraints", 1)
+            self._add_text_with_math(section, constraints, self.styles["ProblemText"])
+
+        examples_table = data.get("examples_table")
+        if examples_table:
+            self._add_heading(section, "Examples", 1)
+            self._add_table(section, examples_table)
+        else:
+            samples = data.get("samples") or data.get("examples") or []
+            if samples:
+                self._add_heading(section, "Sample Test Cases", 1)
+                for idx, sample in enumerate(samples, 1):
+                    self._add_heading(section, f"Sample {idx}", 2)
+                    inp = sample.get("input") or sample.get("content") or ""
+                    out = sample.get("output") or ""
+                    if inp:
+                        section.append(Paragraph("Input:", self.styles["ProblemText"]))
+                        section.append(self._highlight_code(inp, language="text"))
+                    if out:
+                        section.append(Paragraph("Output:", self.styles["ProblemText"]))
+                        section.append(self._highlight_code(out, language="text"))
+
+        # Code snippets
+        code_blocks = data.get("code_blocks") or data.get("code") or []
+        if isinstance(code_blocks, str):
+            code_blocks = [{"code": code_blocks}]
+        if isinstance(code_blocks, dict):  # single block as dict
+            code_blocks = [code_blocks]
+        for block in code_blocks:
+            code = block.get("code") or ""
+            lang = block.get("language")
+            if code:
+                self._add_heading(section, block.get("title", "Code"), 1)
+                section.append(self._highlight_code(code, lang))
+
+        # Images with captions
+        for img in data.get("images", []):
+            url = img.get("url")
+            caption = img.get("alt", "")
+            if url:
+                self._add_image(section, url, caption)
+
+        return section
+
     # ------------------------------------------------------------------
     # PDF generation
     # ------------------------------------------------------------------
 
-    def create_problem_pdf(self, problem: Dict[str, Any], filename: Optional[str] = None) -> str:
+    def create_problem_pdf(
+        self,
+        problem: Dict[str, Any],
+        filename: Optional[str] = None,
+        section_title: str = "Problem Statement",
+    ) -> str:
         """Create a PDF containing a single programming problem.
 
         Parameters
@@ -313,7 +474,9 @@ class PDFCreator:
         title = problem.get("title", "Problem")
         platform = problem.get("platform", "Unknown")
         url = problem.get("url", "")
+        problem.setdefault("scrape_date", datetime.utcnow().isoformat())
         scrape_date = problem.get("scrape_date") or datetime.utcnow().isoformat()
+        problem.setdefault("scrape_date", scrape_date)
 
         if not filename:
             safe_title = re.sub(r"[^a-zA-Z0-9_-]+", "_", title)
@@ -360,62 +523,9 @@ class PDFCreator:
         story.append(toc)
         story.append(PageBreak())
 
-        # Title and metadata
-        self._add_heading(story, title, level=0)
-        story.append(Paragraph(f"Source: {platform}", self.styles["ProblemText"]))
-        if url:
-            story.append(
-                Paragraph(
-                    f"URL: <link href='{url}' color='blue'>{url}</link>",
-                    self.styles["ProblemText"],
-                )
-            )
-        story.append(Paragraph(f"Scraped on: {scrape_date}", self.styles["ProblemText"]))
-        story.append(Spacer(1, 12))
-
-        # Problem statement and sections
-        statement = problem.get("statement") or ""
-        if statement:
-            self._add_heading(story, "Problem Statement", 0)
-            for paragraph in statement.split("\n\n"):
-                self._add_text_with_math(story, paragraph.strip(), self.styles["ProblemText"])
-
-        input_spec = problem.get("input_specification") or problem.get("input_format") or ""
-        if input_spec:
-            self._add_heading(story, "Input", 0)
-            self._add_text_with_math(story, input_spec, self.styles["ProblemText"])
-
-        output_spec = problem.get("output_specification") or problem.get("output_format") or ""
-        if output_spec:
-            self._add_heading(story, "Output", 0)
-            self._add_text_with_math(story, output_spec, self.styles["ProblemText"])
-
-        constraints = problem.get("constraints") or ""
-        if constraints:
-            self._add_heading(story, "Constraints", 0)
-            self._add_text_with_math(story, constraints, self.styles["ProblemText"])
-
-        # Sample test cases
-        samples = problem.get("samples") or []
-        if samples:
-            self._add_heading(story, "Sample Test Cases", 0)
-            for idx, sample in enumerate(samples, 1):
-                self._add_heading(story, f"Sample {idx}", 1)
-                inp = sample.get("input") or sample.get("content") or ""
-                out = sample.get("output") or ""
-                if inp:
-                    story.append(Paragraph("Input:", self.styles["ProblemText"]))
-                    story.append(Preformatted(inp, self.styles["Code"]))
-                if out:
-                    story.append(Paragraph("Output:", self.styles["ProblemText"]))
-                    story.append(Preformatted(out, self.styles["Code"]))
-
-        # Images with captions
-        for img in problem.get("images", []):
-            url = img.get("url")
-            caption = img.get("alt", "")
-            if url:
-                self._add_image(story, url, caption)
+        # Summary and problem content
+        self._add_summary(story, problem)
+        story.extend(self._build_content_story(problem, section_title))
 
         story.append(Spacer(1, 24))
         story.append(
@@ -441,15 +551,14 @@ class PDFCreator:
     # sections into a single document.
     # ------------------------------------------------------------------
 
-    def create_editorial_pdf(self, editorial: Dict[str, Any], filename: Optional[str] = None) -> str:
-        """Generate a PDF for an editorial.
+    def create_editorial_pdf(
+        self, editorial: Dict[str, Any], filename: Optional[str] = None
+    ) -> str:
+        """Generate a PDF for an editorial."""
 
-        Editorial data uses the same structure as problems for the
-        purposes of PDF generation; therefore we reuse
-        :meth:`create_problem_pdf`.
-        """
-
-        return self.create_problem_pdf(editorial, filename=filename)
+        return self.create_problem_pdf(
+            editorial, filename=filename, section_title="Editorial"
+        )
 
     def create_combined_pdf(
         self,
@@ -457,39 +566,72 @@ class PDFCreator:
         editorial: Dict[str, Any],
         filename: Optional[str] = None,
     ) -> str:
-        """Create a single PDF containing both the problem and editorial.
+        """Create a single PDF containing both the problem and editorial."""
 
-        The implementation simply generates two separate PDFs and merges
-        them together.  This keeps the code small while still providing
-        the combined artefact expected by the UI.
-        """
+        title = problem.get("title", "Problem")
+        platform = problem.get("platform", "Unknown")
+        url = problem.get("url", "")
 
         if not filename:
-            title = problem.get("title", "problem")
             safe_title = re.sub(r"[^a-zA-Z0-9_-]+", "_", title)
             filename = f"{safe_title}_complete.pdf"
 
         pdf_path = self.output_dir / filename
 
-        # Generate temporary PDFs
-        tmp_problem = self.create_problem_pdf(problem, filename="_tmp_problem.pdf")
-        tmp_editorial = self.create_problem_pdf(editorial, filename="_tmp_editorial.pdf")
+        doc = _TOCDocumentTemplate(
+            str(pdf_path),
+            pagesize=A4,
+            rightMargin=72,
+            leftMargin=72,
+            topMargin=72,
+            bottomMargin=72,
+        )
 
-        try:
-            from PyPDF2 import PdfMerger
+        doc.title = title
+        doc.author = platform
+        doc.subject = url
+        doc.creator = "OJ Problem Editorial Downloader"
 
-            merger = PdfMerger()
-            for p in [tmp_problem, tmp_editorial]:
-                merger.append(p)
-            with open(pdf_path, "wb") as fh:
-                merger.write(fh)
-            merger.close()
-        finally:
-            for tmp in [tmp_problem, tmp_editorial]:
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
+        story: List[Any] = []
+
+        toc = TableOfContents()
+        toc.levelStyles = [
+            ParagraphStyle(
+                name="TOCLevel1",
+                fontSize=12,
+                leftIndent=20,
+                firstLineIndent=-20,
+                spaceBefore=5,
+            ),
+            ParagraphStyle(
+                name="TOCLevel2",
+                fontSize=10,
+                leftIndent=40,
+                firstLineIndent=-20,
+                spaceBefore=2,
+            ),
+        ]
+        story.append(Paragraph("Table of Contents", self.styles["TitleCenter"]))
+        story.append(toc)
+        story.append(PageBreak())
+
+        self._add_summary(story, problem)
+        story.extend(self._build_content_story(problem, "Problem"))
+        story.extend(self._build_content_story(editorial, "Editorial"))
+
+        story.append(Spacer(1, 24))
+        story.append(
+            Paragraph(
+                f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+                self.styles["ProblemText"],
+            )
+        )
+
+        doc.build(
+            story,
+            onFirstPage=lambda c, d: self._header_footer(c, d, title),
+            onLaterPages=lambda c, d: self._header_footer(c, d, title),
+        )
 
         return str(pdf_path)
 
