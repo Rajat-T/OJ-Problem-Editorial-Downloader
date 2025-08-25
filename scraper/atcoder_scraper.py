@@ -5,7 +5,6 @@ Handles scraping of AtCoder problems and editorials
 
 import re
 from typing import Dict, Any, Optional, List
-from urllib.parse import urljoin, urlparse
 from .base_scraper import BaseScraper
 import logging
 
@@ -52,100 +51,100 @@ class AtCoderScraper(BaseScraper):
             Dict[str, Any]: Standardized problem information
         """
         try:
-            # Validate URL
             match = re.match(self.PROBLEM_PATTERN, url)
             if not match:
                 raise ValueError(f"Invalid AtCoder problem URL: {url}")
-            
-            contest_id, task_id = match.groups()
-            
-            # Get page content
+
+            _, task_id = match.groups()
+
             soup = self.get_page_content(url)
             if not soup:
                 raise Exception("Failed to fetch problem page")
-            
-            # Extract problem title
-            title_elem = soup.find('span', class_='h2')
+
+            # Title
+            title_elem = soup.find('span', class_='h2') or soup.find('h1')
             title = title_elem.get_text(strip=True) if title_elem else f"Problem {task_id.upper()}"
-            
-            # Extract problem statement
-            statement_elem = soup.find('div', {'id': 'task-statement'})
-            problem_statement = ""
-            if statement_elem:
-                # Remove script and style elements
-                for script in statement_elem.find_all(["script", "style"]):
-                    script.decompose()
-                problem_statement = statement_elem.get_text(separator='\n', strip=True)
-            
-            # Extract constraints
-            constraints = ""
-            constraints_elem = soup.find('div', string=re.compile('Constraints', re.IGNORECASE))
-            if constraints_elem:
-                constraints_parent = constraints_elem.find_parent()
-                if constraints_parent:
-                    constraints = constraints_parent.get_text(separator='\n', strip=True)
-            
-            # Extract input/output format
-            input_format = ""
-            output_format = ""
-            
-            io_sections = soup.find_all('div', class_='part')
-            for section in io_sections:
-                section_title = section.find('h3')
-                if section_title:
-                    title_text = section_title.get_text().lower()
-                    content_elem = section.find('div', class_='lang-en')
-                    if not content_elem:
-                        content_elem = section
-                    
-                    content = content_elem.get_text(separator='\n', strip=True)
-                    
-                    if 'input' in title_text and not input_format:
-                        input_format = content
-                    elif 'output' in title_text and not output_format:
-                        output_format = content
-            
-            # Extract sample inputs and outputs
-            examples = []
-            sample_sections = soup.find_all('div', class_='part')
-            sample_inputs = []
-            sample_outputs = []
-            
-            for section in sample_sections:
-                section_title = section.find('h3')
-                if section_title and 'Sample' in section_title.get_text():
-                    pre_elem = section.find('pre')
-                    if pre_elem:
-                        content = pre_elem.get_text(strip=True)
-                        if 'Input' in section_title.get_text():
-                            sample_inputs.append(content)
-                        elif 'Output' in section_title.get_text():
-                            sample_outputs.append(content)
-            
-            # Pair inputs with outputs
-            for i, (inp, out) in enumerate(zip(sample_inputs, sample_outputs)):
-                examples.append({
-                    'input': inp,
-                    'output': out,
-                    'explanation': ''
-                })
-            
-            # Extract time and memory limits (AtCoder typically shows these in constraints)
+
+            # Time and memory limits
+            page_text = soup.get_text(" ", strip=True)
             time_limit = ""
             memory_limit = ""
-            
-            if constraints:
-                time_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:sec|second)', constraints, re.IGNORECASE)
-                memory_match = re.search(r'(\d+)\s*(?:MB|megabyte)', constraints, re.IGNORECASE)
-                
-                if time_match:
-                    time_limit = f"{time_match.group(1)} seconds"
-                if memory_match:
-                    memory_limit = f"{memory_match.group(1)} MB"
-            
-            # Handle images
-            images = self.handle_images_for_pdf(soup, url)
-            
+            time_match = re.search(r'Time Limit:?\s*([0-9.]+)\s*(?:sec|s)', page_text, re.IGNORECASE)
+            mem_match = re.search(r'Memory Limit:?\s*(\d+)\s*(?:MB|MiB)', page_text, re.IGNORECASE)
+            if time_match:
+                time_limit = f"{time_match.group(1)} seconds"
+            if mem_match:
+                memory_limit = f"{mem_match.group(1)} MB"
+
+            # Problem statement container (prefer English)
+            statement_elem = soup.find('div', id='task-statement')
+            if not statement_elem:
+                raise Exception("Problem statement not found")
+            lang_div = statement_elem.find(class_='lang-en') or statement_elem.find(class_='lang-ja') or statement_elem
+
+            problem_statement_parts: List[str] = []
+            input_format = ""
+            output_format = ""
+            constraints = ""
+            examples: List[Dict[str, str]] = []
+            sample_inputs: List[str] = []
+            sample_outputs: List[str] = []
+
+            parts = lang_div.find_all('div', class_='part')
+            for part in parts:
+                heading_elem = part.find(['h3', 'h2'])
+                heading = heading_elem.get_text(strip=True) if heading_elem else ""
+                heading_lower = heading.lower()
+                if heading_elem:
+                    heading_elem.decompose()
+
+                if 'sample' in heading_lower or 'example' in heading_lower:
+                    table = part.find('table')
+                    if table:
+                        inp = out = ''
+                        for row in table.find_all('tr'):
+                            th = row.find('th')
+                            pre = row.find('pre')
+                            if th and pre:
+                                th_text = th.get_text(strip=True).lower()
+                                pre_text = pre.get_text('\n', strip=True)
+                                if 'input' in th_text:
+                                    inp = pre_text
+                                elif 'output' in th_text:
+                                    out = pre_text
+                        if inp or out:
+                            examples.append({'input': inp, 'output': out, 'explanation': ''})
+                    else:
+                        pre_tags = part.find_all('pre')
+                        if len(pre_tags) == 1:
+                            text = pre_tags[0].get_text('\n', strip=True)
+                            if 'input' in heading_lower:
+                                sample_inputs.append(text)
+                            elif 'output' in heading_lower:
+                                sample_outputs.append(text)
+                        elif len(pre_tags) >= 2:
+                            inp = pre_tags[0].get_text('\n', strip=True)
+                            out = pre_tags[1].get_text('\n', strip=True)
+                            examples.append({'input': inp, 'output': out, 'explanation': ''})
+                    continue
+
+                text = part.get_text(separator='\n', strip=True)
+                if 'constraint' in heading_lower:
+                    constraints = text
+                elif 'input' in heading_lower:
+                    input_format = text
+                elif 'output' in heading_lower:
+                    output_format = text
+                else:
+                    problem_statement_parts.append(text)
+
+            for inp, out in zip(sample_inputs, sample_outputs):
+                examples.append({'input': inp, 'output': out, 'explanation': ''})
+
+            problem_statement = '\n\n'.join(part for part in problem_statement_parts if part)
+
+            images = self.handle_images_for_pdf(lang_div, url)
+
             return self.create_standard_format(
                 title=title,
                 problem_statement=problem_statement,
@@ -155,9 +154,9 @@ class AtCoderScraper(BaseScraper):
                 examples=examples,
                 time_limit=time_limit,
                 memory_limit=memory_limit,
-                images=images
+                images=images,
             )
-            
+
         except Exception as e:
             logger.error(f"Failed to extract problem statement from {url}: {e}")
             return self.create_standard_format(title=f"Error: {str(e)}")
@@ -173,46 +172,40 @@ class AtCoderScraper(BaseScraper):
             Dict[str, Any]: Standardized editorial information
         """
         try:
-            # Validate URL
             match = re.match(self.EDITORIAL_PATTERN, url)
             if not match:
                 raise ValueError(f"Invalid AtCoder editorial URL: {url}")
-            
+
             contest_id = match.group(1)
-            
-            # Get page content
+
             soup = self.get_page_content(url)
             if not soup:
                 raise Exception("Failed to fetch editorial page")
-            
-            # Extract title
-            title = f"Editorial - Contest {contest_id}"
-            
-            # Extract editorial content
-            editorial_content = ""
-            content_divs = soup.find_all('div', class_='col-sm-12')
-            
-            for div in content_divs:
-                # Look for editorial content
-                text = div.get_text(separator='\n', strip=True)
-                if any(keyword in text.lower() for keyword in ['editorial', 'solution', 'explanation']):
-                    editorial_content += text + "\n\n"
-            
+
+            title_elem = soup.find('span', class_='h2') or soup.find('h1') or soup.find('title')
+            title = title_elem.get_text(strip=True) if title_elem else f"Editorial - Contest {contest_id}"
+
+            content_container = (
+                soup.find('div', id='main-container')
+                or soup.find('div', id='editorial')
+                or soup
+            )
+            lang_div = content_container.find(class_='lang-en') or content_container.find(class_='lang-ja') or content_container
+
+            for tag in lang_div.find_all(['script', 'style']):
+                tag.decompose()
+            editorial_content = lang_div.get_text(separator='\n', strip=True)
             if not editorial_content:
-                # Fallback: get main content
-                main_content = soup.find('div', class_='row')
-                if main_content:
-                    editorial_content = main_content.get_text(separator='\n', strip=True)
-            
-            # Handle images
-            images = self.handle_images_for_pdf(soup, url)
-            
+                editorial_content = soup.get_text(separator='\n', strip=True)
+
+            images = self.handle_images_for_pdf(lang_div, url)
+
             return self.create_standard_format(
                 title=title,
                 problem_statement=editorial_content,
-                images=images
+                images=images,
             )
-            
+
         except Exception as e:
             logger.error(f"Failed to extract editorial from {url}: {e}")
             return self.create_standard_format(title=f"Error: {str(e)}")
