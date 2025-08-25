@@ -256,7 +256,7 @@ class AtCoderScraper(BaseScraper):
             current_section = None
             section_content = []
             
-            for element in content_div.find_all(['h3', 'h4', 'p', 'div', 'pre', 'section']):
+            for element in content_div.find_all(['h3', 'h4', 'p', 'div', 'pre', 'section', 'ul', 'ol']):
                 # Check if this is a section header
                 if element.name in ['h3', 'h4', 'section']:
                     # Save previous section if any
@@ -354,12 +354,18 @@ class AtCoderScraper(BaseScraper):
                 examples = self._extract_examples_from_elements(elements)
                 result['examples'].extend(examples)
             else:
-                # Extract text content
+                # Extract text content, preserving bullet lists
                 content_parts = []
                 for element in elements:
-                    text = element.get_text(separator='\n', strip=True)
-                    if text:
-                        content_parts.append(text)
+                    if element.name in ['ul', 'ol']:
+                        for li in element.find_all('li'):
+                            item = li.get_text(separator=' ', strip=True)
+                            if item:
+                                content_parts.append(f"• {item}")
+                    else:
+                        text = element.get_text(separator='\n', strip=True)
+                        if text:
+                            content_parts.append(text)
                 
                 content = '\n'.join(content_parts)
                 if content:

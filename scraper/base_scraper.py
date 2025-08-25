@@ -303,12 +303,15 @@ class BaseScraper(ABC):
             return ""
         
         try:
-            # Remove extra whitespace
-            text = re.sub(r'\s+', ' ', text.strip())
-            
-            # Fix common formatting issues
-            text = re.sub(r'\n\s*\n', '\n\n', text)  # Normalize paragraph breaks
-            text = re.sub(r'\s*\n\s*', '\n', text)   # Clean line breaks
+            # Normalize different newline representations first
+            text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+            # Remove extra spaces while preserving line breaks
+            text = re.sub(r'[ \t]+', ' ', text.strip())
+
+            # Normalize multiple blank lines and spaces around newlines
+            text = re.sub(r'\n{3,}', '\n\n', text)  # Collapse many blank lines
+            text = re.sub(r' *\n *', '\n', text)     # Trim spaces around newlines
             
             # Remove HTML entities that might have been missed
             html_entities = {
@@ -345,7 +348,7 @@ class BaseScraper(ABC):
                 text = re.sub(f'(\\d){cmd}(\\d)', f'\\1 {cmd} \\2', text)
             
             # Clean up multiple spaces that might have been introduced
-            text = re.sub(r'\s+', ' ', text)
+            text = re.sub(r'[ \t]+', ' ', text)
             
             # Handle common mathematical constraint patterns
             # Example: "1 \leq T \leq 5" should have proper spacing

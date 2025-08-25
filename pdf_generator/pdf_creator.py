@@ -884,131 +884,15 @@ class PDFCreator:
         return text
 
     def _process_text_content(self, text: str) -> List[str]:
-        """Process text content to handle line breaks and formatting exactly like the original website."""
+        """Split text into paragraphs while preserving line breaks."""
         if not text:
             return []
-        
-        # Clean up the text first
+
         text = text.strip()
-        
-        # Split the text into lines and analyze each line
-        lines = text.split('\n')
-        
-        # Clean and filter lines
-        clean_lines = []
-        for line in lines:
-            line = line.strip()
-            if line:  # Only keep non-empty lines
-                clean_lines.append(line)
-        
-        if not clean_lines:
-            return []
-        
-        # If we have very few lines, just return them as separate paragraphs
-        if len(clean_lines) <= 3:
-            return clean_lines
-        
-        # Advanced processing for complex content
-        paragraphs = []
-        current_paragraph = []
-        
-        i = 0
-        while i < len(clean_lines):
-            line = clean_lines[i]
-            
-            # Check if this line should be its own paragraph
-            is_standalone = (
-                # Format indicators
-                line.lower().endswith(':') or
-                line.lower().startswith('the input is given') or
-                line.lower().startswith('output the answers') or
-                line.lower().startswith('each case is given') or
-                line.lower().startswith('here,') or
-                # Single variables or short format lines
-                re.match(r'^[A-Z]$', line.strip()) or  # Single letter like 'T'
-                re.match(r'^[a-z]+[0-9]+$', line.strip()) or  # case1, output1
-                re.match(r'^[a-z]+[A-Z]$', line.strip()) or  # caseT, outputT
-                line.strip() in [':', '...', '⋮'] or
-                # Mathematical or symbolic lines
-                len(line.split()) == 1 and line.strip() in ['T', 'H', 'W', 'L', 'N', 'M', 'r', 'c']
-            )
-            
-            # Check if this starts a format specification block
-            is_format_start = any(indicator in line.lower() for indicator in [
-                'following format:', 'given from standard input', 'answers in the following'
-            ])
-            
-            if is_format_start:
-                # Finish current paragraph
-                if current_paragraph:
-                    paragraphs.append(' '.join(current_paragraph))
-                    current_paragraph = []
-                
-                # Add the format description line
-                paragraphs.append(line)
-                
-                # Look ahead for format specification lines
-                j = i + 1
-                format_lines = []
-                while j < len(clean_lines):
-                    next_line = clean_lines[j]
-                    # Check if this looks like a format specification
-                    if (len(next_line.split()) <= 6 and  # Short lines
-                        (re.match(r'^[A-Z]+[0-9]*$', next_line.strip()) or  # T, case1, etc.
-                         next_line.strip() in [':', '...', '⋮'] or
-                         re.match(r'^[a-z]+[0-9]+$', next_line.strip()) or  # case1, output1
-                         re.match(r'^[a-z]+[A-Z]$', next_line.strip()))):
-                        format_lines.append(next_line)
-                        j += 1
-                    else:
-                        break
-                
-                # Add format lines as a single code block content
-                if format_lines:
-                    paragraphs.append('FORMAT_BLOCK:' + '\n'.join(format_lines))
-                    i = j - 1  # Continue from where we left off
-                
-            elif is_standalone:
-                # Finish current paragraph
-                if current_paragraph:
-                    paragraphs.append(' '.join(current_paragraph))
-                    current_paragraph = []
-                
-                # Add this line as its own paragraph
-                paragraphs.append(line)
-                
-            else:
-                # Check if this line should start a new paragraph based on content change
-                should_break = (
-                    current_paragraph and  # We have existing content
-                    (len(current_paragraph) >= 2 or  # Current paragraph is getting long
-                     (line.lower().startswith(('for each', 'more precisely', 'note that', 
-                                              'if it is', 'let (', 'output integer')) and
-                      len(current_paragraph) >= 1))  # Semantic break indicators
-                )
-                
-                if should_break:
-                    # Finish current paragraph
-                    paragraphs.append(' '.join(current_paragraph))
-                    current_paragraph = [line]
-                else:
-                    # Add to current paragraph
-                    current_paragraph.append(line)
-            
-            i += 1
-        
-        # Don't forget the last paragraph
-        if current_paragraph:
-            paragraphs.append(' '.join(current_paragraph))
-        
-        # Clean up and validate paragraphs
-        result = []
-        for paragraph in paragraphs:
-            paragraph = paragraph.strip()
-            if paragraph:
-                result.append(paragraph)
-        
-        return result
+
+        # Split paragraphs on double newlines, keep single newlines inside paragraphs
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        return paragraphs
 
     def _add_text_with_math(self, story: List[Any], text: str, style: ParagraphStyle) -> None:
         """Add text to the story while rendering math blocks and handling format blocks.
@@ -1028,12 +912,17 @@ class PDFCreator:
             story.append(self._highlight_code(format_content, language="text"))
             story.append(Spacer(1, 6))
             return
-        
+
+        # Preserve line breaks during formatting
+        newline_placeholder = "<<<BR>>>"
+        text = text.replace("\n", newline_placeholder)
+
         # First convert LaTeX symbols to Unicode or proper format
         text = self._convert_latex_symbols(text)
-        
+
         # Improve spacing and formatting for better readability
         text = self._improve_text_formatting(text)
+        text = text.replace(newline_placeholder, '<br/>')
         
         # Handle special cases for mathematical content in PDFs
         # Replace problematic subscripts/superscripts with readable alternatives
