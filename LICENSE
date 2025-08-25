@@ -1,0 +1,122 @@
+MIT License
+
+Copyright (c) 2024 OJ Problem Editorial Downloader Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## Third-Party Licenses
+
+This project includes software with the following licenses:
+
+### Selenium WebDriver
+- **License**: Apache License 2.0
+- **Copyright**: Copyright 2011-2023 Software Freedom Conservancy
+- **Source**: https://github.com/SeleniumHQ/selenium
+
+### Beautiful Soup 4
+- **License**: MIT License
+- **Copyright**: Copyright (c) 2004-2023 Leonard Richardson
+- **Source**: https://www.crummy.com/software/BeautifulSoup/
+
+### ReportLab
+- **License**: BSD 3-Clause License
+- **Copyright**: Copyright (c) 2000-2023, ReportLab Inc.
+- **Source**: https://github.com/MrBitBucket/reportlab-mirror
+
+### Requests
+- **License**: Apache License 2.0
+- **Copyright**: Copyright 2019 Kenneth Reitz
+- **Source**: https://github.com/psf/requests
+
+### WebDriver Manager
+- **License**: Apache License 2.0
+- **Copyright**: Copyright 2020 Sergey Pirogov
+- **Source**: https://github.com/SergeyPirogov/webdriver_manager
+
+### lxml
+- **License**: BSD 3-Clause License
+- **Copyright**: Copyright (c) 2004 Infrae. All rights reserved.
+- **Source**: https://github.com/lxml/lxml
+
+### Pillow (PIL Fork)
+- **License**: HPND License
+- **Copyright**: Copyright (c) 1997-2011 by Secret Labs AB
+- **Source**: https://github.com/python-pillow/Pillow
+
+### Pygments
+- **License**: BSD 2-Clause License
+- **Copyright**: Copyright (c) 2006-2023 by the respective authors
+- **Source**: https://github.com/pygments/pygments
+
+## Attribution
+
+This project makes use of data and content from various competitive programming platforms:
+
+### AtCoder
+- **Website**: https://atcoder.jp/
+- **Terms**: Please respect AtCoder's Terms of Service when using this tool
+- **Content**: Problem statements and editorials are property of AtCoder Inc.
+
+### Codeforces
+- **Website**: https://codeforces.com/
+- **Terms**: Please respect Codeforces' Terms of Service when using this tool
+- **Content**: Problem statements and editorials are property of Codeforces
+
+### SPOJ (Sphere Online Judge)
+- **Website**: https://www.spoj.com/
+- **Terms**: Please respect SPOJ's Terms of Service when using this tool
+- **Content**: Problem statements are property of SPOJ and their respective authors
+
+## Disclaimer
+
+This software is provided for educational and personal use only. Users are responsible for:
+
+1. **Respecting platform terms of service** and usage policies
+2. **Using appropriate rate limiting** to avoid overloading servers
+3. **Checking robots.txt** and platform policies before scraping
+4. **Using the tool responsibly** and ethically
+
+The developers and contributors of this project:
+- Do not endorse any misuse of this tool
+- Are not responsible for any violations of platform terms of service
+- Do not guarantee the accuracy or completeness of extracted content
+- Are not liable for any damages resulting from the use of this software
+
+## Fair Use
+
+This tool is designed to operate within the bounds of fair use:
+
+- **Educational Purpose**: The tool is intended for educational use by competitive programmers
+- **Personal Use**: Downloaded content should be used for personal practice and study
+- **No Commercial Use**: This tool should not be used for commercial purposes without proper authorization
+- **Respect Copyright**: All content remains the property of the respective platforms and authors
+
+## Contributing
+
+By contributing to this project, you agree that your contributions will be licensed under the same MIT License as the project.
+
+## Contact
+
+For questions about licensing or to report license violations, please contact:
+- **Email**: legal@ojdownloader.com
+- **GitHub Issues**: https://github.com/your-username/OJ-Problem-Editorial-Downloader/issues
+
+---
+
+**Last Updated**: January 15, 2024

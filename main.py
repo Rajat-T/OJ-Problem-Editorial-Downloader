@@ -13,6 +13,12 @@ This module provides:
 - Integration of all components (scraper, PDF generator, UI)
 """
 
+__version__ = "1.0.0"
+__author__ = "OJ Downloader Team"
+__email__ = "support@ojdownloader.com"
+__license__ = "MIT"
+__description__ = "Download and generate PDFs from online judge problem statements and editorials"
+
 import sys
 import os
 import argparse

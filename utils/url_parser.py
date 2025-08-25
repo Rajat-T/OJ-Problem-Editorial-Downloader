@@ -1,6 +1,35 @@
 """
 URL Parser for OJ Problem Editorial Downloader
-Handles URL validation, parsing, and platform detection with comprehensive error handling
+
+This module provides comprehensive URL validation, parsing, and platform detection
+for competitive programming platforms. It handles various URL formats, normalizes
+URLs for consistency, and extracts relevant information for each supported platform.
+
+The URLParser class supports:
+- Platform detection using regex patterns
+- URL normalization and validation
+- Extraction of contest IDs, problem IDs, and other metadata
+- Generation of related URLs (e.g., editorial URLs from problem URLs)
+- Comprehensive error handling and validation
+
+Supported Platforms:
+- AtCoder: Problem statements, editorials, and contest pages
+- Codeforces: Problems, blog entries, and contest pages
+- SPOJ: Problem statements
+
+Example:
+    >>> parser = URLParser()
+    >>> result = parser.parse_url("https://atcoder.jp/contests/abc123/tasks/abc123_a")
+    >>> print(result['platform'])
+    'AtCoder'
+    >>> print(result['contest_id'])
+    'abc123'
+    >>> print(result['task_id'])
+    'abc123_a'
+
+Note:
+    All URLs are normalized to ensure consistent processing. The parser handles
+    various URL formats including with/without www, http/https, and query parameters.
 """
 
 import re
@@ -18,7 +47,38 @@ logger = logging.getLogger(__name__)
 
 class URLParser:
     """
-    Utility class for parsing and validating competitive programming platform URLs
+    Utility class for parsing and validating competitive programming platform URLs.
+    
+    This class provides comprehensive URL processing capabilities including platform
+    detection, URL normalization, metadata extraction, and related URL generation.
+    It supports multiple competitive programming platforms with robust error handling.
+    
+    Attributes:
+        PLATFORM_PATTERNS (Dict): Regex patterns for each supported platform
+        supported_platforms (List[str]): List of platform names currently supported
+        
+    The parser handles various URL formats for each platform:
+    
+    AtCoder:
+        - Problem URLs: https://atcoder.jp/contests/{contest}/tasks/{task}
+        - Editorial URLs: https://atcoder.jp/contests/{contest}/editorial
+        - Contest URLs: https://atcoder.jp/contests/{contest}
+        
+    Codeforces:
+        - Contest Problems: https://codeforces.com/contest/{contest}/problem/{problem}
+        - Problemset: https://codeforces.com/problemset/problem/{contest}/{problem}
+        - Blog Entries: https://codeforces.com/blog/entry/{entry_id}
+        
+    SPOJ:
+        - Problem URLs: https://www.spoj.com/problems/{problem_code}/
+        
+    Example:
+        >>> parser = URLParser()
+        >>> result = parser.parse_url("https://atcoder.jp/contests/abc123/tasks/abc123_a")
+        >>> if result['is_valid']:
+        ...     print(f"Platform: {result['platform']}")
+        ...     print(f"Contest: {result['contest_id']}")
+        ...     print(f"Problem: {result['task_id']}")
     """
     
     # Comprehensive platform patterns with variations
@@ -66,7 +126,15 @@ class URLParser:
     
     def __init__(self):
         """
-        Initialize URL Parser
+        Initialize URL Parser with supported platform configurations.
+        
+        Sets up the list of supported platforms based on the PLATFORM_PATTERNS
+        dictionary. No additional configuration is required for basic usage.
+        
+        Example:
+            >>> parser = URLParser()
+            >>> print(parser.supported_platforms)
+            ['AtCoder', 'Codeforces', 'SPOJ']
         """
         self.supported_platforms = list(self.PLATFORM_PATTERNS.keys())
     
@@ -116,13 +184,48 @@ class URLParser:
     
     def parse_url(self, url: str) -> Dict[str, Any]:
         """
-        Parse URL and extract relevant information
+        Parse URL and extract comprehensive information about the competitive programming resource.
+        
+        This method performs complete URL analysis including platform detection,
+        normalization, validation, and extraction of platform-specific metadata.
+        It returns a dictionary with all relevant information needed for processing.
         
         Args:
-            url (str): URL to parse
+            url (str): The URL to parse and analyze
             
         Returns:
-            Dict[str, Any]: Parsed URL information
+            Dict[str, Any]: Comprehensive parsed URL information containing:
+                - original_url (str): The input URL as provided
+                - normalized_url (str): Cleaned and standardized URL
+                - domain (str): Domain name of the URL
+                - path (str): URL path component
+                - query (Dict): Parsed query parameters
+                - platform (str): Detected platform name ('AtCoder', 'Codeforces', 'SPOJ')
+                - type (str): Resource type ('problem', 'editorial', 'blog', etc.)
+                - is_valid (bool): Whether the URL is valid and supported
+                - Platform-specific fields (contest_id, task_id, problem_id, etc.)
+                - error (str): Error message if parsing failed
+                
+        Example:
+            >>> parser = URLParser()
+            >>> result = parser.parse_url("https://atcoder.jp/contests/abc300/tasks/abc300_a")
+            >>> print(result)
+            {
+                'original_url': 'https://atcoder.jp/contests/abc300/tasks/abc300_a',
+                'normalized_url': 'https://atcoder.jp/contests/abc300/tasks/abc300_a',
+                'domain': 'atcoder.jp',
+                'platform': 'AtCoder',
+                'type': 'problem',
+                'contest_id': 'abc300',
+                'task_id': 'abc300_a',
+                'is_valid': True,
+                'editorial_url': 'https://atcoder.jp/contests/abc300/editorial',
+                # ... additional fields
+            }
+            
+        Note:
+            If parsing fails, the returned dictionary will contain 'error' and
+            'is_valid' will be False. Always check 'is_valid' before using the data.
         """
         try:
             normalized_url = self.normalize_url(url)

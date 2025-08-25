@@ -1,6 +1,30 @@
 """
 Base scraper class for OJ Problem Editorial Downloader
-Provides common interface and functionality for all platform scrapers
+
+This module provides the abstract base class and common functionality for all platform-specific
+scrapers. It handles web scraping operations, error handling, rate limiting, and provides
+a standardized interface for extracting problem statements and editorials from various
+online judge platforms.
+
+The BaseScraper class implements:
+- Selenium WebDriver management with automatic driver setup
+- Requests session configuration with retry logic
+- Rate limiting to respect server resources
+- Comprehensive error handling and recovery mechanisms
+- Platform detection using URL patterns
+- Text processing and image extraction utilities
+- Network error handling with exponential backoff
+
+Example:
+    >>> from scraper.atcoder_scraper import AtCoderScraper
+    >>> scraper = AtCoderScraper(headless=True, timeout=30)
+    >>> problem_data = scraper.get_problem_statement("https://atcoder.jp/contests/abc123/tasks/abc123_a")
+    >>> print(problem_data['title'])
+    "A. Problem Title"
+
+Note:
+    All platform-specific scrapers must inherit from this class and implement
+    the abstract methods: get_problem_statement(), get_editorial(), and is_valid_url().
 """
 
 from abc import ABC, abstractmethod
@@ -46,7 +70,33 @@ logger = logging.getLogger(__name__)
 
 class BaseScraper(ABC):
     """
-    Abstract base class for all platform-specific scrapers
+    Abstract base class for all platform-specific scrapers.
+    
+    This class provides common functionality for web scraping operations including
+    Selenium WebDriver management, HTTP session configuration, rate limiting,
+    error handling, and standardized data extraction methods.
+    
+    All platform-specific scrapers must inherit from this class and implement
+    the abstract methods for their respective platforms.
+    
+    Attributes:
+        PLATFORM_PATTERNS (Dict[str, List[str]]): URL regex patterns for platform detection
+        headless (bool): Whether to run browser in headless mode
+        timeout (int): Request timeout in seconds
+        rate_limit (float): Minimum seconds between requests
+        session (requests.Session): Configured HTTP session with retry logic
+        driver (webdriver.Chrome): Selenium WebDriver instance
+        max_retries (int): Maximum number of retry attempts
+        backoff_factor (float): Exponential backoff multiplier
+        
+    Example:
+        >>> class MyPlatformScraper(BaseScraper):
+        ...     def get_problem_statement(self, url: str) -> Dict[str, Any]:
+        ...         # Implementation for specific platform
+        ...         pass
+        ...
+        >>> scraper = MyPlatformScraper(headless=True, rate_limit=2.0)
+        >>> data = scraper.get_problem_statement("https://example.com/problem/123")
     """
     
     # Platform patterns for URL detection
@@ -66,12 +116,31 @@ class BaseScraper(ABC):
     
     def __init__(self, headless: bool = True, timeout: int = 30, rate_limit: float = 1.0):
         """
-        Initialize the base scraper
+        Initialize the base scraper with configuration options.
+        
+        Sets up HTTP session with retry logic, configures browser options,
+        and initializes error tracking mechanisms.
         
         Args:
-            headless (bool): Whether to run browser in headless mode
-            timeout (int): Request timeout in seconds
-            rate_limit (float): Minimum seconds between requests
+            headless (bool, optional): Whether to run browser in headless mode.
+                Defaults to True for better performance.
+            timeout (int, optional): Request timeout in seconds. Defaults to 30.
+                Applied to both HTTP requests and browser operations.
+            rate_limit (float, optional): Minimum seconds between requests.
+                Defaults to 1.0 to respect server resources.
+                
+        Raises:
+            NetworkError: If session configuration fails
+            
+        Example:
+            >>> scraper = BaseScraper(headless=False, timeout=60, rate_limit=2.0)
+            >>> scraper.timeout
+            60
+            
+        Note:
+            The session is configured with automatic retries for 5xx status codes
+            and connection errors. User-Agent and other headers are set to mimic
+            a real browser for better compatibility.
         """
         self.headless = headless
         self.timeout = timeout
@@ -167,13 +236,30 @@ class BaseScraper(ABC):
     
     def detect_platform(self, url: str) -> Optional[str]:
         """
-        Detect platform from URL
+        Detect the online judge platform from a given URL.
+        
+        Uses predefined regex patterns to identify which platform the URL belongs to.
+        Supports AtCoder, Codeforces, and SPOJ platforms with various URL formats.
         
         Args:
-            url (str): URL to analyze
+            url (str): The URL to analyze for platform detection
             
         Returns:
-            Optional[str]: Platform name if detected, None otherwise
+            Optional[str]: Platform name if detected ('AtCoder', 'Codeforces', 'SPOJ'),
+                          None if no platform pattern matches
+                          
+        Example:
+            >>> scraper = BaseScraper()
+            >>> scraper.detect_platform("https://atcoder.jp/contests/abc123/tasks/abc123_a")
+            'AtCoder'
+            >>> scraper.detect_platform("https://codeforces.com/contest/1234/problem/A")
+            'Codeforces'
+            >>> scraper.detect_platform("https://example.com/unknown")
+            None
+            
+        Note:
+            Platform detection is case-sensitive and requires exact pattern matching.
+            URLs should be properly formatted with protocol (http/https).
         """
         try:
             for platform, patterns in self.PLATFORM_PATTERNS.items():
