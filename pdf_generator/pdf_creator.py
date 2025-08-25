@@ -750,6 +750,41 @@ class PDFCreator:
         # Decode HTML entities first
         text = html.unescape(text)
         
+        # Handle Unicode subscripts and superscripts first (before black square handling)
+        unicode_subscripts = {
+            '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', 
+            '₆': '6', '₇': '7', '₈': '8', '₉': '9', 
+            'ₐ': 'a', 'ₑ': 'e', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 
+            'ₘ': 'm', 'ₙ': 'n', 'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 
+            'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x', 'ᵧ': 'y', 'ᵦ': 'β'
+        }
+        
+        unicode_superscripts = {
+            '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5',
+            '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', 
+            'ᵃ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f',
+            'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l',
+            'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's',
+            'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y', 'ᶻ': 'z'
+        }
+        
+        # Convert Unicode subscripts to bracket notation for better PDF compatibility
+        for unicode_sub, ascii_sub in unicode_subscripts.items():
+            # Look for patterns like A₁, case₁, etc.
+            text = re.sub(r'([A-Za-z]+)' + re.escape(unicode_sub), r'\1[' + ascii_sub + ']', text)
+            # Also handle standalone subscripts
+            text = text.replace(unicode_sub, ascii_sub)
+        
+        # Convert Unicode superscripts to caret notation
+        for unicode_sup, ascii_sup in unicode_superscripts.items():
+            text = re.sub(r'([A-Za-z0-9]+)' + re.escape(unicode_sup), r'\1^' + ascii_sup, text)
+            text = text.replace(unicode_sup, ascii_sup)
+        
+        # Handle black square characters with intelligent replacement
+        # Pattern: case■1■ → case[1], A■i■ → A[i]
+        text = re.sub(r'([A-Za-z]+)■([0-9A-Za-z]+)■', r'\1[\2]', text)
+        text = re.sub(r'([A-Za-z])■([A-Za-z])■', r'\1[\2]', text)
+        
         # Handle problematic Unicode characters that appear as black squares
         # Extended list of problematic characters
         problematic_chars = {
@@ -884,7 +919,7 @@ class PDFCreator:
         return text
 
     def _process_text_content(self, text: str, preserve_lines: bool = False) -> List[str]:
-        """Split text into paragraphs and optionally preserve single line breaks.
+        """Split text into paragraphs and detect format blocks with enhanced AtCoder pattern recognition.
 
         Parameters
         ----------
@@ -900,7 +935,11 @@ class PDFCreator:
             return []
 
         text = text.strip()
-
+        
+        # Enhanced format block detection for AtCoder patterns
+        if self._should_extract_format_blocks(text):
+            return self._extract_format_blocks(text)
+        
         if not preserve_lines:
             # Replace single newlines with spaces while keeping paragraph breaks
             text = re.sub(r'(?<!\n)\n(?!\n)', ' ', text)
@@ -908,6 +947,114 @@ class PDFCreator:
         # Split paragraphs on double newlines
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
         return paragraphs
+    
+    def _should_extract_format_blocks(self, text: str) -> bool:
+        """Determine if text contains format blocks that should be specially processed."""
+        # Look for format indicators
+        format_indicators = [
+            'following format:', 'given from standard input', 'format:',
+            'standard input in the following', 'input is given'
+        ]
+        
+        text_lower = text.lower()
+        has_format_indicator = any(indicator in text_lower for indicator in format_indicators)
+        
+        # Look for typical format patterns
+        has_format_pattern = bool(re.search(r'\b(case[0-9T]+|output[0-9T]+)\b', text, re.IGNORECASE))
+        
+        # Look for variable definitions like "T\ncase1\ncase2"
+        has_variable_sequence = bool(re.search(r'\n[A-Z]\n.*\ncase[0-9T]', text))
+        
+        return has_format_indicator or has_format_pattern or has_variable_sequence
+    
+    def _extract_format_blocks(self, text: str) -> List[str]:
+        """Extract and process format blocks from AtCoder-style text."""
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        if not lines:
+            return []
+        
+        result = []
+        current_paragraph = []
+        format_block = []
+        in_format_block = False
+        
+        for i, line in enumerate(lines):
+            line_lower = line.lower()
+            
+            # Check if this line indicates start of format specification
+            if any(indicator in line_lower for indicator in 
+                   ['following format:', 'format:', 'given from standard input']):
+                # Save current paragraph if exists
+                if current_paragraph:
+                    result.append(' '.join(current_paragraph))
+                    current_paragraph = []
+                
+                # Add the format indicator line
+                result.append(line)
+                in_format_block = True
+                continue
+            
+            # Check if we're in a format block
+            if in_format_block:
+                # Check if this looks like a format specification line
+                if self._is_format_spec_line(line):
+                    format_block.append(line)
+                    continue
+                else:
+                    # End of format block
+                    if format_block:
+                        result.append(f"FORMAT_BLOCK:{chr(10).join(format_block)}")
+                        format_block = []
+                    in_format_block = False
+                    # Continue processing this line as regular text
+            
+            # Regular text processing
+            current_paragraph.append(line)
+        
+        # Handle remaining content
+        if format_block:
+            result.append(f"FORMAT_BLOCK:{chr(10).join(format_block)}")
+        elif current_paragraph:
+            result.append(' '.join(current_paragraph))
+        
+        return [item for item in result if item.strip()]
+    
+    def _is_format_spec_line(self, line: str) -> bool:
+        """Determine if a line looks like a format specification."""
+        line = line.strip()
+        
+        # Empty lines in format blocks
+        if not line:
+            return True
+            
+        # Single uppercase letters (T, N, M, etc.)
+        if re.match(r'^[A-Z]$', line):
+            return True
+            
+        # Format variables like case1, caseT, output1, outputT
+        if re.match(r'^[a-z]+[0-9T]+$', line, re.IGNORECASE):
+            return True
+            
+        # Mathematical notation like A₁, A₂, etc.
+        if re.match(r'^[A-Z][₀-₉ᵢⱼₖₗₘₙₚᵣₛₜᵤᵥwₓᵧᵧ]+$', line):
+            return True
+            
+        # Simple variable sequences like "A B C", "A₁ A₂ ... Aₙ"
+        if re.match(r'^[A-Z][₀-₉ᵢⱼₖₗₘₙₚᵣₛₜᵤᵥwₓᵧᵧ]*\s+[A-Z][₀-₉ᵢⱼₖₗₘₙₚᵣₛₜᵤᵥwₓᵧᵧ]*', line):
+            return True
+            
+        # Special symbols commonly used in format specs
+        if line in [':', '...', '⋮', '⋯']:
+            return True
+            
+        # Short lines with limited words (likely format specs)
+        if len(line.split()) <= 3 and len(line) <= 20:
+            # But exclude obvious sentences
+            if not any(word in line.lower() for word in 
+                      ['the', 'and', 'or', 'is', 'are', 'will', 'should', 'must']):
+                return True
+        
+        return False
 
     def _add_text_with_math(self, story: List[Any], text: str, style: ParagraphStyle) -> None:
         """Add text to the story while rendering math blocks and handling format blocks.
@@ -928,29 +1075,18 @@ class PDFCreator:
             story.append(Spacer(1, 6))
             return
 
+        # Apply text improvements first, then convert LaTeX symbols
+        text = self._improve_text_formatting(text)
+        text = self._convert_latex_symbols(text)
+        
         # Preserve line breaks during formatting
         newline_placeholder = "<<<BR>>>"
         text = text.replace("\n", newline_placeholder)
-
-        # First convert LaTeX symbols to Unicode or proper format
-        text = self._convert_latex_symbols(text)
-
-        # Improve spacing and formatting for better readability
-        text = self._improve_text_formatting(text)
         text = text.replace(newline_placeholder, '<br/>')
         
-        # Handle special cases for mathematical content in PDFs
-        # Replace problematic subscripts/superscripts with readable alternatives
-        # This helps with font rendering issues
-        text = re.sub(r'([A-Za-z])_(\d+)', r'\1[\2]', text)  # A_1 -> A[1]
-        text = re.sub(r'([A-Za-z])_([a-zA-Z])', r'\1[\2]', text)  # A_i -> A[i]
-        
-        # Check if this is a single line that should be formatted specially
-        is_single_variable = re.match(r'^[A-Z]$', text.strip())  # Single letters like 'T'
-        is_format_line = (len(text.split()) <= 3 and 
-                         (re.match(r'^[a-z]+[0-9]+$', text.strip()) or  # case1, output1
-                          re.match(r'^[a-z]+[A-Z]$', text.strip()) or   # caseT, outputT
-                          text.strip() in [':', '...', '⋮']))
+        # Enhanced format variable detection
+        is_single_variable = re.match(r'^[A-Z]$', text.strip())  # Single letters like 'T', 'N'
+        is_format_line = self._is_format_variable_line(text.strip())
         
         if is_single_variable or is_format_line:
             # Format as a centered, code-like element
@@ -1022,14 +1158,48 @@ class PDFCreator:
                     converted_expr = self._convert_latex_symbols(expr)
                     story.append(Paragraph(f"[Math: {converted_expr}]", style))
             else:
-                # Regular text - clean it up before adding
-                clean_text = self._convert_latex_symbols(part)
-                clean_text = self._improve_text_formatting(clean_text)
-                if clean_text.strip():
-                    story.append(Paragraph(clean_text, style))
+                # Regular text - make sure it's clean
+                if part.strip():
+                    story.append(Paragraph(part, style))
         
         # Add spacing after the whole block
         story.append(Spacer(1, 4))
+        
+    def _is_format_variable_line(self, text: str) -> bool:
+        """Enhanced detection of format variable lines."""
+        if not text:
+            return False
+            
+        # Remove HTML tags for checking
+        clean_text = re.sub(r'<[^>]+>', '', text).strip()
+        
+        # Check various format patterns
+        patterns = [
+            r'^[a-z]+[0-9]+$',                    # case1, output1, input1
+            r'^[a-z]+[A-Z]$',                     # caseT, outputT, inputT  
+            r'^[A-Z][\[\]][0-9A-Za-z]+[\[\]]$',   # A[1], A[i], etc.
+            r'^[A-Z]\^[0-9A-Za-z]+$',             # A^1, A^i, etc.
+        ]
+        
+        for pattern in patterns:
+            if re.match(pattern, clean_text):
+                return True
+        
+        # Check for short lines with limited complexity
+        word_count = len(clean_text.split())
+        if word_count <= 3 and len(clean_text) <= 20:
+            # Special symbols
+            if clean_text in [':', '...', '\u22ee', '\u22ef', '\u22f1']:
+                return True
+            # Simple variable combinations like "A B C", "X Y"
+            if re.match(r'^[A-Z](\\s+[A-Z])*$', clean_text):
+                return True
+            # Avoid classifying obvious sentences
+            if not any(word in clean_text.lower() for word in 
+                      ['the', 'and', 'or', 'is', 'are', 'will', 'should', 'must', 'given', 'print']):
+                return True
+                
+        return False
     def _add_heading(
         self,
         story: List[Any],
