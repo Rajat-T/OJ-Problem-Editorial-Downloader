@@ -420,6 +420,11 @@ class BaseScraper(ABC):
             if not src:
                 return None
             
+            # Filter out language flag images and other unwanted images
+            if self._should_exclude_image(img_tag, src):
+                logger.debug(f"Excluding image: {src}")
+                return None
+            
             # Convert relative URLs to absolute
             try:
                 if src.startswith('http'):
@@ -469,6 +474,105 @@ class BaseScraper(ABC):
         except Exception as e:
             logger.warning(f"Error processing image: {e}")
             return None
+    
+    def _should_exclude_image(self, img_tag, src: str) -> bool:
+        """
+        Determine if an image should be excluded from PDF generation.
+        This filters out language flags, decorative icons, and other unwanted images.
+        
+        Args:
+            img_tag: BeautifulSoup img tag
+            src (str): Image source URL
+            
+        Returns:
+            bool: True if the image should be excluded
+        """
+        try:
+            # Get image attributes for analysis
+            alt_text = (img_tag.get('alt', '') or '').lower()
+            title_text = (img_tag.get('title', '') or '').lower()
+            class_names = ' '.join(img_tag.get('class', [])).lower()
+            src_lower = src.lower()
+            
+            # Flag image patterns (common language indicators)
+            flag_patterns = [
+                'flag', 'lang', 'language', 'jp.png', 'en.png', 'ja.png',
+                'japan', 'british', 'english', 'japanese', 'uk.png', 'gb.png'
+            ]
+            
+            # Check if image is a language flag
+            for pattern in flag_patterns:
+                if (pattern in src_lower or 
+                    pattern in alt_text or 
+                    pattern in title_text or
+                    pattern in class_names):
+                    logger.debug(f"Excluding flag/language image: {src} (matched pattern: {pattern})")
+                    return True
+            
+            # Small decorative images (likely icons)
+            width = img_tag.get('width')
+            height = img_tag.get('height')
+            try:
+                if width and height:
+                    w, h = int(width), int(height)
+                    # Exclude very small images (likely icons/flags)
+                    if w <= 32 and h <= 32:
+                        logger.debug(f"Excluding small decorative image: {src} ({w}x{h})")
+                        return True
+            except (ValueError, TypeError):
+                pass
+            
+            # AtCoder specific patterns
+            if 'atcoder.jp' in src_lower:
+                atcoder_exclude_patterns = [
+                    '/img/lang/', '/images/lang/', '/static/lang/',
+                    'language-selector', 'lang-', '_lang_', 'flag_',
+                    '/common/img/', '/img/flag/', '/images/flag/'
+                ]
+                
+                for pattern in atcoder_exclude_patterns:
+                    if pattern in src_lower:
+                        logger.debug(f"Excluding AtCoder language/flag image: {src} (matched pattern: {pattern})")
+                        return True
+            
+            # Navigation and UI elements
+            ui_patterns = [
+                'nav', 'menu', 'button', 'icon', 'logo', 'banner',
+                'header', 'footer', 'sidebar', 'advertisement', 'ad',
+                'social', 'share', 'twitter', 'facebook', 'github'
+            ]
+            
+            for pattern in ui_patterns:
+                if (pattern in src_lower or 
+                    pattern in alt_text or 
+                    pattern in class_names):
+                    logger.debug(f"Excluding UI/navigation image: {src} (matched pattern: {pattern})")
+                    return True
+            
+            # Common icon file patterns
+            icon_patterns = [
+                '.ico', 'favicon', 'sprite', 'thumb', 'avatar',
+                '_icon', '-icon', 'icon_', 'icon-'
+            ]
+            
+            for pattern in icon_patterns:
+                if pattern in src_lower:
+                    logger.debug(f"Excluding icon image: {src} (matched pattern: {pattern})")
+                    return True
+            
+            # Empty or placeholder images
+            if (not alt_text.strip() and not title_text.strip() and 
+                ('placeholder' in src_lower or 'blank' in src_lower or 
+                 'empty' in src_lower or 'spacer' in src_lower)):
+                logger.debug(f"Excluding placeholder image: {src}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Error in image exclusion check for {src}: {e}")
+            # On error, include the image to avoid losing content
+            return False
     
     def _get_image_format(self, url: str) -> str:
         """
