@@ -602,7 +602,7 @@ Comprehensive documentation is available:
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. The license permits commercial use, including training large language models, by any organization.
 
 ### Third-Party Licenses
 
@@ -628,7 +628,7 @@ If you discover a security vulnerability, please send an email to [security@your
 
 ## ⚖️ Disclaimer
 
-This tool is for educational purposes and personal use. Please:
+This tool may be used for educational, research, or commercial purposes, including training large language models. Please:
 
 - **Respect platform terms of service** and usage policies
 - **Use reasonable rate limiting** to avoid overloading servers
