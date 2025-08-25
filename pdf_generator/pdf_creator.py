@@ -663,6 +663,30 @@ class PDFCreator:
         # Decode HTML entities first
         text = html.unescape(text)
         
+        # Handle problematic Unicode characters that appear as black squares
+        problematic_chars = {
+            '\u25A0': '_',  # Black Large Square → underscore
+            '\u25A1': '_',  # White Large Square → underscore 
+            '\u25AA': '_',  # Black Small Square → underscore
+            '\u25AB': '_',  # White Small Square → underscore
+            '\u2588': '_',  # Full Block → underscore
+            '\u2589': '_',  # Left Seven Eighths Block → underscore
+            '\u258A': '_',  # Left Three Quarters Block → underscore
+            '\u258B': '_',  # Left Five Eighths Block → underscore
+            '\u258C': '_',  # Left Half Block → underscore
+            '\u258D': '_',  # Left Three Eighths Block → underscore
+            '\u258E': '_',  # Left One Quarter Block → underscore
+            '\u258F': '_',  # Left One Eighth Block → underscore
+            '\u2590': '_',  # Right Half Block → underscore
+            '\u2591': '_',  # Light Shade → underscore
+            '\u2592': '_',  # Medium Shade → underscore
+            '\u2593': '_',  # Dark Shade → underscore
+            '\uFFFD': '_',  # Replacement Character → underscore
+        }
+        
+        for char, replacement in problematic_chars.items():
+            text = text.replace(char, replacement)
+        
         # Handle common HTML/XML entities that might not be decoded
         html_entities = {
             '&nbsp;': ' ',
@@ -683,7 +707,33 @@ class PDFCreator:
         
         for entity, replacement in html_entities.items():
             text = text.replace(entity, replacement)
-            
+        
+        # Fix common patterns from competitive programming problems
+        # First handle patterns where letters get concatenated incorrectly
+        # Be more specific to avoid false positives
+        text = re.sub(r'\b([a-z]+)n([A-Z])n\b', r'\1_\2', text)  # casenTn → case_T
+        text = re.sub(r'\b([A-Z])n([A-Z])n\b', r'\1_\2', text)  # AnNn → A_N  
+        text = re.sub(r'\b([A-Z])n([a-z])n\b', r'\1_\2', text)  # Anin → A_i
+        text = re.sub(r'\b([a-z]+)n([a-z])n\b', r'\1_\2', text)  # outputnin → output_i
+        
+        # Pattern: word_number_ → word_number (remove trailing underscore)
+        text = re.sub(r'([a-zA-Z]+)_([0-9]+)_', r'\1_\2', text)
+        
+        # Pattern: Letter_X_ → Letter[X] for better PDF compatibility
+        text = re.sub(r'([A-Za-z])_([0-9]+)_', r'\1[\2]', text)
+        text = re.sub(r'([A-Za-z])_([a-zA-Z])_', r'\1[\2]', text)
+        
+        # Pattern: standalone _X_ → [X] (but not for words)
+        text = re.sub(r'\b_([0-9]+)_\b', r'[\1]', text)
+        text = re.sub(r'\b_([a-zA-Z])_\b', r'[\1]', text)
+        
+        # Fix double underscores
+        text = re.sub(r'__+', '_', text)
+        
+        # Clean up leading/trailing underscores around spaces
+        text = re.sub(r'_\s+', ' ', text)
+        text = re.sub(r'\s+_', ' ', text)
+        
         # Fix common spacing issues
         text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
         text = re.sub(r'\s*,\s*', ', ', text)  # Fix comma spacing
