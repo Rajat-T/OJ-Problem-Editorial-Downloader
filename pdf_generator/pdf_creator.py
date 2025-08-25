@@ -461,10 +461,11 @@ class PDFCreator:
     ) -> None:
         """Create a heading paragraph and register it for the TOC."""
 
+        if page_break_before:
+            story.append(PageBreak())
+            
         style_name = "Heading1" if level == 0 else "Heading2"
         para = Paragraph(text, self.styles[style_name])
-        if page_break_before:
-            para.__dict__["pageBreakBefore"] = True
         bookmark = re.sub(r"[^a-zA-Z0-9]+", "_", text) + f"_{level}"
         para._bookmarkName = bookmark
         para._headingText = text
@@ -485,14 +486,37 @@ class PDFCreator:
         if not local_path:
             return
 
-        img = RLImage(str(local_path), width=max_width, preserveAspectRatio=True)
-        img.hAlign = "CENTER"
-        story.append(img)
+        try:
+            # Get image dimensions to preserve aspect ratio
+            with Image.open(local_path) as pil_img:
+                original_width, original_height = pil_img.size
+                
+            # Calculate dimensions while preserving aspect ratio
+            if original_width > max_width:
+                # Scale down proportionally
+                aspect_ratio = original_height / original_width
+                img_width = max_width
+                img_height = max_width * aspect_ratio
+            else:
+                # Use original size if smaller than max_width
+                img_width = original_width
+                img_height = original_height
+            
+            img = RLImage(str(local_path), width=img_width, height=img_height)
+            img.hAlign = "CENTER"
+            story.append(img)
 
-        if caption:
-            self._figure_counter += 1
+            if caption:
+                self._figure_counter += 1
+                story.append(
+                    Paragraph(f"Figure {self._figure_counter}: {caption}", self.styles["ImageCaption"])
+                )
+                
+        except Exception as e:
+            logger.warning(f"Error processing image {url}: {e}")
+            # Add a placeholder text instead of failing
             story.append(
-                Paragraph(f"Figure {self._figure_counter}: {caption}", self.styles["ImageCaption"])
+                Paragraph(f"[Image could not be loaded: {url}]", self.styles["ImageCaption"])
             )
 
     def _add_table(self, story: List[Any], data: Sequence[Sequence[str]]) -> None:
@@ -554,17 +578,18 @@ class PDFCreator:
         section: List[Any] = []
         self._add_heading(section, section_title, 0, page_break_before=True)
 
-        statement = data.get("statement") or data.get("content") or ""
+        # Use the correct field names that come from the scrapers
+        statement = data.get("problem_statement") or data.get("statement") or data.get("content") or ""
         if statement:
             for paragraph in statement.split("\n\n"):
                 self._add_text_with_math(section, paragraph.strip(), self.styles["ProblemText"])
 
-        input_spec = data.get("input_specification") or data.get("input_format") or ""
+        input_spec = data.get("input_format") or data.get("input_specification") or ""
         if input_spec:
             self._add_heading(section, "Input", 1)
             self._add_text_with_math(section, input_spec, self.styles["ProblemText"])
 
-        output_spec = data.get("output_specification") or data.get("output_format") or ""
+        output_spec = data.get("output_format") or data.get("output_specification") or ""
         if output_spec:
             self._add_heading(section, "Output", 1)
             self._add_text_with_math(section, output_spec, self.styles["ProblemText"])
@@ -583,7 +608,7 @@ class PDFCreator:
             self._add_heading(section, "Examples", 1)
             self._add_table(section, examples_table)
         else:
-            samples = data.get("samples") or data.get("examples") or []
+            samples = data.get("examples") or data.get("samples") or []
             if samples:
                 self._add_heading(section, "Sample Test Cases", 1)
                 for idx, sample in enumerate(samples, 1):
@@ -765,9 +790,27 @@ class PDFCreator:
                     logger.warning(f"Failed to add summary section: {e}")
                 
                 try:
-                    story.extend(self._build_content_story(problem, section_title))
+                    content_story = self._build_content_story(problem, section_title)
+                    logger.debug(f"Content story built successfully, type: {type(content_story)}, length: {len(content_story)}")
+                    
+                    # Validate content_story before extending
+                    if not isinstance(content_story, list):
+                        logger.error(f"Content story is not a list: {type(content_story)}")
+                        raise PDFGenerationError(f"Content story validation failed: expected list, got {type(content_story)}")
+                    
+                    # Check each item in content_story
+                    for i, item in enumerate(content_story):
+                        if hasattr(item, 'insert') and not isinstance(item, list):
+                            logger.warning(f"Item {i} has insert method but is not a list: {type(item)}")
+                    
+                    logger.debug(f"Extending story with {len(content_story)} items")
+                    story.extend(content_story)
+                    logger.debug(f"Story extended successfully, new length: {len(story)}")
+                    
                 except Exception as e:
                     logger.error(f"Failed to build main content: {e}")
+                    import traceback
+                    logger.error(f"Full traceback: {traceback.format_exc()}")
                     # Add error information to PDF
                     story.append(Paragraph("Content Generation Error", self.styles["Heading1"]))
                     story.append(Paragraph(f"An error occurred while generating the PDF content: {str(e)}", 

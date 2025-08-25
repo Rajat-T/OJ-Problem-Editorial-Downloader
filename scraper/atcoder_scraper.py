@@ -221,3 +221,246 @@ class AtCoderScraper(BaseScraper):
         except Exception as e:
             logger.error(f"Failed to extract editorial from {url}: {e}")
             return self.create_standard_format(title=f"Error: {str(e)}")
+    
+    def _extract_problem_sections(self, content_div, url: str) -> Dict[str, Any]:
+        """
+        Extract problem sections from AtCoder problem content
+        
+        Args:
+            content_div: BeautifulSoup element containing problem content
+            url (str): URL for context in error messages
+            
+        Returns:
+            Dict[str, Any]: Dictionary with extracted problem sections
+        """
+        result = {
+            'problem_statement': '',
+            'input_format': '',
+            'output_format': '',
+            'constraints': '',
+            'examples': []
+        }
+        
+        try:
+            if not content_div:
+                logger.warning(f"No content div provided for {url}")
+                return result
+                
+            # Remove script and style tags
+            for tag in content_div.find_all(['script', 'style']):
+                tag.decompose()
+            
+            # Find section headers and extract content
+            sections = content_div.find_all(['h3', 'h4', 'section'])
+            
+            current_section = None
+            section_content = []
+            
+            for element in content_div.find_all(['h3', 'h4', 'p', 'div', 'pre', 'section']):
+                # Check if this is a section header
+                if element.name in ['h3', 'h4', 'section']:
+                    # Save previous section if any
+                    if current_section and section_content:
+                        self._process_section(current_section, section_content, result)
+                    
+                    # Start new section
+                    section_text = element.get_text(strip=True).lower()
+                    current_section = self._identify_section_type(section_text)
+                    section_content = []
+                else:
+                    # Add content to current section
+                    if element.get_text(strip=True):
+                        section_content.append(element)
+            
+            # Process the last section
+            if current_section and section_content:
+                self._process_section(current_section, section_content, result)
+            
+            # If no sections found, try to extract examples directly
+            if not result['examples']:
+                result['examples'] = self._extract_examples_fallback(content_div)
+            
+            # If no problem statement found, use the main content
+            if not result['problem_statement']:
+                # Remove sample inputs/outputs and headers
+                main_content = content_div.get_text(separator='\n', strip=True)
+                # Clean up the content
+                lines = main_content.split('\n')
+                filtered_lines = []
+                skip_next = False
+                
+                for line in lines:
+                    line_lower = line.lower().strip()
+                    if skip_next:
+                        skip_next = False
+                        continue
+                    if any(keyword in line_lower for keyword in ['sample input', 'sample output', 'input format', 'output format', 'constraints']):
+                        skip_next = True
+                        continue
+                    if line.strip():
+                        filtered_lines.append(line)
+                
+                result['problem_statement'] = '\n'.join(filtered_lines[:20])  # Limit to first 20 lines
+            
+            # Clean all text content
+            for key in ['problem_statement', 'input_format', 'output_format', 'constraints']:
+                if result[key]:
+                    result[key] = self.clean_and_format_text(result[key])
+            
+            logger.debug(f"Extracted sections for {url}: {list(result.keys())}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error extracting problem sections from {url}: {e}")
+            return result
+    
+    def _identify_section_type(self, section_text: str) -> str:
+        """
+        Identify the type of section based on header text
+        
+        Args:
+            section_text (str): Section header text
+            
+        Returns:
+            str: Section type identifier
+        """
+        section_text = section_text.lower().strip()
+        
+        if 'problem' in section_text or 'statement' in section_text:
+            return 'problem_statement'
+        elif 'input' in section_text:
+            return 'input_format'
+        elif 'output' in section_text:
+            return 'output_format'
+        elif 'constraint' in section_text or 'limit' in section_text:
+            return 'constraints'
+        elif 'sample' in section_text or 'example' in section_text:
+            return 'examples'
+        else:
+            return 'problem_statement'  # Default to problem statement
+    
+    def _process_section(self, section_type: str, elements: List, result: Dict[str, Any]) -> None:
+        """
+        Process a section and add content to result
+        
+        Args:
+            section_type (str): Type of section
+            elements (List): List of BeautifulSoup elements
+            result (Dict[str, Any]): Result dictionary to update
+        """
+        try:
+            if section_type == 'examples':
+                # Extract examples
+                examples = self._extract_examples_from_elements(elements)
+                result['examples'].extend(examples)
+            else:
+                # Extract text content
+                content_parts = []
+                for element in elements:
+                    text = element.get_text(separator='\n', strip=True)
+                    if text:
+                        content_parts.append(text)
+                
+                content = '\n'.join(content_parts)
+                if content:
+                    if result[section_type]:
+                        result[section_type] += '\n\n' + content
+                    else:
+                        result[section_type] = content
+                        
+        except Exception as e:
+            logger.warning(f"Error processing section {section_type}: {e}")
+    
+    def _extract_examples_from_elements(self, elements: List) -> List[Dict[str, str]]:
+        """
+        Extract examples from a list of elements
+        
+        Args:
+            elements (List): List of BeautifulSoup elements
+            
+        Returns:
+            List[Dict[str, str]]: List of example dictionaries
+        """
+        examples = []
+        
+        try:
+            current_input = None
+            current_output = None
+            
+            for element in elements:
+                text = element.get_text(strip=True)
+                if not text:
+                    continue
+                    
+                # Check if this is input or output
+                if 'input' in text.lower():
+                    if current_input and current_output:
+                        examples.append({
+                            'input': current_input,
+                            'output': current_output
+                        })
+                        current_output = None
+                    current_input = text
+                elif 'output' in text.lower():
+                    current_output = text
+                elif element.name == 'pre':
+                    # This is likely sample data
+                    if current_input and not current_output:
+                        current_output = text
+                    elif not current_input:
+                        current_input = text
+            
+            # Add the last example if we have both input and output
+            if current_input and current_output:
+                examples.append({
+                    'input': current_input,
+                    'output': current_output
+                })
+            
+        except Exception as e:
+            logger.warning(f"Error extracting examples from elements: {e}")
+            
+        return examples
+    
+    def _extract_examples_fallback(self, content_div) -> List[Dict[str, str]]:
+        """
+        Fallback method to extract examples when standard parsing fails
+        
+        Args:
+            content_div: BeautifulSoup element containing problem content
+            
+        Returns:
+            List[Dict[str, str]]: List of example dictionaries
+        """
+        examples = []
+        
+        try:
+            # Look for pre tags that might contain examples
+            pre_tags = content_div.find_all('pre')
+            
+            for i in range(0, len(pre_tags), 2):
+                if i + 1 < len(pre_tags):
+                    input_text = pre_tags[i].get_text(strip=True)
+                    output_text = pre_tags[i + 1].get_text(strip=True)
+                    
+                    if input_text and output_text:
+                        examples.append({
+                            'input': input_text,
+                            'output': output_text
+                        })
+            
+            # If no pre tags, look for divs with sample content
+            if not examples:
+                sample_divs = content_div.find_all('div', string=re.compile(r'sample|example', re.IGNORECASE))
+                for div in sample_divs[:4]:  # Limit to first 4 examples
+                    text = div.get_text(strip=True)
+                    if text:
+                        examples.append({
+                            'input': text,
+                            'output': 'See problem statement'
+                        })
+            
+        except Exception as e:
+            logger.warning(f"Error in fallback example extraction: {e}")
+            
+        return examples
