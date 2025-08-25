@@ -85,7 +85,7 @@ This project makes use of data and content from various competitive programming 
 
 ## Disclaimer
 
-This software is provided for educational and personal use only. Users are responsible for:
+This software is provided under the MIT License for educational, research, and commercial use, including training large language models. Users are responsible for:
 
 1. **Respecting platform terms of service** and usage policies
 2. **Using appropriate rate limiting** to avoid overloading servers
@@ -98,13 +98,12 @@ The developers and contributors of this project:
 - Do not guarantee the accuracy or completeness of extracted content
 - Are not liable for any damages resulting from the use of this software
 
-## Fair Use
+## Usage Guidelines
 
-This tool is designed to operate within the bounds of fair use:
+This tool may be used in accordance with the following guidelines:
 
-- **Educational Purpose**: The tool is intended for educational use by competitive programmers
-- **Personal Use**: Downloaded content should be used for personal practice and study
-- **No Commercial Use**: This tool should not be used for commercial purposes without proper authorization
+- **Educational and Research Use**: The tool supports personal learning and academic research
+- **Commercial and LLM Training Use**: Commercial use, including training large language models, is permitted
 - **Respect Copyright**: All content remains the property of the respective platforms and authors
 
 ## Contributing

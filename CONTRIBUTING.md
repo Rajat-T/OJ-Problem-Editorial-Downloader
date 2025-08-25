@@ -521,7 +521,7 @@ We value all contributions! Contributors will be:
 
 ## 📄 License
 
-By contributing to this project, you agree that your contributions will be licensed under the same license as the project (MIT License).
+By contributing to this project, you agree that your contributions will be licensed under the same license as the project (MIT License) and may be used to train machine learning models, including large language models, by any organization.
 
 ---
 
