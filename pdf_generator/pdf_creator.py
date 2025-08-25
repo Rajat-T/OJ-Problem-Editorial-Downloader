@@ -34,6 +34,7 @@ import io
 import logging
 import os
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -53,12 +54,18 @@ from reportlab.platypus import (
     SimpleDocTemplate,
     Spacer,
     Table,
-    TableOfContents,
     TableStyle,
 )
+from reportlab.platypus.tableofcontents import TableOfContents
 from pygments import highlight
 from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name, guess_lexer
+
+# Import our comprehensive error handling
+from utils.error_handler import (
+    PDFGenerationError, FileSystemError, NetworkError, 
+    handle_exception, ErrorDetector, error_reporter
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,21 +112,63 @@ class PDFCreator:
         base_font_size: int = 11,
         body_font: str = "Helvetica",
     ) -> None:
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        self.base_font_size = base_font_size
-        self.body_font = body_font
-
-        # Styles used throughout the document
-        self.styles = getSampleStyleSheet()
-        self._setup_custom_styles()
-
-        # Cache directory for downloaded/created images
-        self.image_cache_dir = self.output_dir / "images"
-        self.image_cache_dir.mkdir(exist_ok=True)
-
-        self._figure_counter = 0
+        try:
+            self.output_dir = Path(output_dir)
+            
+            # Validate and create output directory with error handling
+            try:
+                self.output_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError as e:
+                raise FileSystemError(f"Permission denied creating output directory: {output_dir}", 
+                                    str(output_dir), e)
+            except OSError as e:
+                raise FileSystemError(f"Failed to create output directory: {output_dir}", 
+                                    str(output_dir), e)
+            
+            # Validate parameters
+            if not (6 <= base_font_size <= 24):
+                logger.warning(f"Font size {base_font_size} outside recommended range 6-24, using 11")
+                base_font_size = 11
+            
+            if not body_font or not isinstance(body_font, str):
+                logger.warning(f"Invalid body font '{body_font}', using Helvetica")
+                body_font = "Helvetica"
+            
+            self.base_font_size = base_font_size
+            self.body_font = body_font
+            
+            # Check disk space
+            if not ErrorDetector.check_disk_space(str(self.output_dir), required_mb=100):
+                logger.warning("Low disk space detected, PDF generation might fail")
+            
+            # Styles used throughout the document
+            try:
+                self.styles = getSampleStyleSheet()
+                self._setup_custom_styles()
+            except Exception as e:
+                logger.error(f"Failed to setup PDF styles: {e}")
+                raise PDFGenerationError(f"Style setup failed: {str(e)}", e)
+            
+            # Cache directory for downloaded/created images
+            self.image_cache_dir = self.output_dir / "images"
+            try:
+                self.image_cache_dir.mkdir(exist_ok=True)
+            except Exception as e:
+                logger.warning(f"Failed to create image cache directory: {e}")
+                # Use temp directory as fallback
+                import tempfile
+                self.image_cache_dir = Path(tempfile.mkdtemp(prefix="oj_pdf_images_"))
+                logger.info(f"Using temporary image cache: {self.image_cache_dir}")
+            
+            self._figure_counter = 0
+            
+            logger.info(f"PDFCreator initialized successfully. Output: {self.output_dir}")
+            
+        except (FileSystemError, PDFGenerationError):
+            raise
+        except Exception as e:
+            logger.error(f"Failed to initialize PDFCreator: {e}")
+            raise PDFGenerationError(f"Initialization failed: {str(e)}", e)
 
     # ------------------------------------------------------------------
     # Style setup
@@ -128,73 +177,97 @@ class PDFCreator:
     def _setup_custom_styles(self) -> None:
         """Create a couple of custom styles used in documents."""
 
-        self.styles.add(
-            ParagraphStyle(
-                name="TitleCenter",
-                parent=self.styles["Title"],
-                alignment=TA_CENTER,
-                fontSize=20,
-                spaceAfter=24,
-                textColor=colors.darkblue,
+        # Add TitleCenter if it doesn't exist
+        if "TitleCenter" not in self.styles:
+            self.styles.add(
+                ParagraphStyle(
+                    name="TitleCenter",
+                    parent=self.styles["Title"],
+                    alignment=TA_CENTER,
+                    fontSize=20,
+                    spaceAfter=24,
+                    textColor=colors.darkblue,
+                )
             )
-        )
 
-        self.styles.add(
-            ParagraphStyle(
-                name="Heading1",
-                parent=self.styles["Heading1"],
-                spaceBefore=18,
-                spaceAfter=12,
-                textColor=colors.darkblue,
+        # Update existing Heading1 or create custom one
+        if "Heading1" in self.styles:
+            heading1 = self.styles["Heading1"]
+            heading1.spaceBefore = 18
+            heading1.spaceAfter = 12
+            heading1.textColor = colors.darkblue
+        else:
+            self.styles.add(
+                ParagraphStyle(
+                    name="Heading1",
+                    parent=self.styles["Normal"],
+                    fontSize=16,
+                    spaceBefore=18,
+                    spaceAfter=12,
+                    textColor=colors.darkblue,
+                )
             )
-        )
 
-        self.styles.add(
-            ParagraphStyle(
-                name="Heading2",
-                parent=self.styles["Heading2"],
-                spaceBefore=12,
-                spaceAfter=6,
-                textColor=colors.blue,
+        # Update existing Heading2 or create custom one
+        if "Heading2" in self.styles:
+            heading2 = self.styles["Heading2"]
+            heading2.spaceBefore = 12
+            heading2.spaceAfter = 6
+            heading2.textColor = colors.blue
+        else:
+            self.styles.add(
+                ParagraphStyle(
+                    name="Heading2",
+                    parent=self.styles["Normal"],
+                    fontSize=14,
+                    spaceBefore=12,
+                    spaceAfter=6,
+                    textColor=colors.blue,
+                )
             )
-        )
 
+        # Add Code style if it doesn't exist
         code_size = max(6, self.base_font_size - 1)
-        self.styles.add(
-            ParagraphStyle(
-                name="Code",
-                parent=self.styles["Normal"],
-                fontName="Courier",
-                fontSize=code_size,
-                backColor=colors.whitesmoke,
-                leftIndent=6,
-                rightIndent=6,
-                leading=code_size + 2,
-                spaceAfter=6,
+        if "Code" not in self.styles:
+            self.styles.add(
+                ParagraphStyle(
+                    name="Code",
+                    parent=self.styles["Normal"],
+                    fontName="Courier",
+                    fontSize=code_size,
+                    backColor=colors.whitesmoke,
+                    leftIndent=6,
+                    rightIndent=6,
+                    leading=code_size + 2,
+                    spaceAfter=6,
+                )
             )
-        )
 
-        self.styles.add(
-            ParagraphStyle(
-                name="ProblemText",
-                parent=self.styles["Normal"],
-                alignment=TA_JUSTIFY,
-                fontName=self.body_font,
-                fontSize=self.base_font_size,
-                leading=self.base_font_size + 3,
-                spaceAfter=6,
+        # Add ProblemText style if it doesn't exist
+        if "ProblemText" not in self.styles:
+            self.styles.add(
+                ParagraphStyle(
+                    name="ProblemText",
+                    parent=self.styles["Normal"],
+                    alignment=TA_JUSTIFY,
+                    fontName=self.body_font,
+                    fontSize=self.base_font_size,
+                    leading=self.base_font_size + 3,
+                    spaceAfter=6,
+                )
             )
-        )
 
-        self.styles.add(
-            ParagraphStyle(
-                name="ImageCaption",
-                parent=self.styles["Italic"],
-                fontSize=9,
-                alignment=TA_CENTER,
-                spaceAfter=12,
+        # Add ImageCaption style if it doesn't exist
+        if "ImageCaption" not in self.styles:
+            self.styles.add(
+                ParagraphStyle(
+                    name="ImageCaption",
+                    parent=self.styles["Italic"],
+                    fontSize=9,
+                    alignment=TA_CENTER,
+                    spaceAfter=12,
+                )
             )
-        )
 
     # ------------------------------------------------------------------
     # Helper methods
@@ -221,19 +294,116 @@ class PDFCreator:
         canvas.restoreState()
 
     def _download_image(self, url: str, filename: str) -> Optional[Path]:
-        """Download an image and cache it locally."""
-
+        """Download an image and cache it locally with comprehensive error handling."""
+        
+        if not url or not url.strip():
+            logger.warning("Empty image URL provided")
+            return None
+        
+        if not filename or not filename.strip():
+            logger.warning("Empty filename provided for image download")
+            return None
+        
         try:
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-
-            path = self.image_cache_dir / filename
-            path.write_bytes(response.content)
-            # Validate that the file is an image
-            Image.open(path).verify()
-            return path
-        except Exception as exc:  # pragma: no cover - network/IO guard
-            logger.warning("Failed to download image %s: %s", url, exc)
+            # Validate URL format
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.netloc:
+                logger.warning(f"Invalid image URL format: {url}")
+                return None
+            
+            # Check if file already exists
+            file_path = self.image_cache_dir / filename
+            if file_path.exists():
+                try:
+                    # Verify existing file is valid
+                    Image.open(file_path).verify()
+                    logger.debug(f"Using cached image: {filename}")
+                    return file_path
+                except Exception as e:
+                    logger.warning(f"Cached image is corrupted, re-downloading: {e}")
+                    try:
+                        file_path.unlink()
+                    except Exception:
+                        pass
+            
+            # Download with timeout and retry logic
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                try:
+                    logger.info(f"Downloading image: {url} (attempt {attempt + 1}/{max_attempts})")
+                    
+                    response = requests.get(
+                        url, 
+                        timeout=30, 
+                        headers={
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        },
+                        stream=True
+                    )
+                    response.raise_for_status()
+                    
+                    # Check content type
+                    content_type = response.headers.get('content-type', '').lower()
+                    if not any(img_type in content_type for img_type in ['image/', 'application/octet-stream']):
+                        logger.warning(f"Unexpected content type for image {url}: {content_type}")
+                    
+                    # Check content length
+                    content_length = response.headers.get('content-length')
+                    if content_length:
+                        size_mb = int(content_length) / (1024 * 1024)
+                        if size_mb > 10:  # 10MB limit
+                            logger.warning(f"Image too large ({size_mb:.1f}MB): {url}")
+                            return None
+                    
+                    # Download and validate content
+                    content = response.content
+                    if len(content) < 100:  # Very small file, likely not a real image
+                        logger.warning(f"Image file too small ({len(content)} bytes): {url}")
+                        continue
+                    
+                    # Save to temporary file first
+                    temp_path = file_path.with_suffix('.tmp')
+                    try:
+                        temp_path.write_bytes(content)
+                        
+                        # Verify it's a valid image
+                        with Image.open(temp_path) as img:
+                            img.verify()
+                        
+                        # If verification succeeds, move to final location
+                        shutil.move(str(temp_path), str(file_path))
+                        
+                        logger.info(f"Successfully downloaded image: {filename}")
+                        return file_path
+                        
+                    except Exception as img_error:
+                        logger.warning(f"Invalid image content from {url}: {img_error}")
+                        try:
+                            temp_path.unlink()
+                        except Exception:
+                            pass
+                        if attempt == max_attempts - 1:
+                            return None
+                        continue
+                        
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"Network error downloading image {url} (attempt {attempt + 1}): {e}")
+                    if attempt == max_attempts - 1:
+                        return None
+                    import time
+                    time.sleep(1 * (attempt + 1))  # Progressive delay
+                    continue
+                except Exception as e:
+                    logger.warning(f"Unexpected error downloading image {url}: {e}")
+                    if attempt == max_attempts - 1:
+                        return None
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to download image {url}: {e}")
             return None
 
     def _render_math(self, expression: str) -> Optional[Path]:
@@ -453,13 +623,15 @@ class PDFCreator:
     # PDF generation
     # ------------------------------------------------------------------
 
+    @handle_exception
     def create_problem_pdf(
         self,
         problem: Dict[str, Any],
         filename: Optional[str] = None,
         section_title: str = "Problem Statement",
     ) -> str:
-        """Create a PDF containing a single programming problem.
+        """
+        Create a PDF containing a single programming problem with comprehensive error handling.
 
         Parameters
         ----------
@@ -469,80 +641,187 @@ class PDFCreator:
         filename:
             Optional custom filename.  When omitted one is generated from
             the problem title and platform.
+        section_title:
+            Title for the main section
+            
+        Returns
+        -------
+        str:
+            Path to the created PDF file
+            
+        Raises
+        ------
+        PDFGenerationError:
+            If PDF generation fails
+        FileSystemError:
+            If file system operations fail
         """
-
-        title = problem.get("title", "Problem")
-        platform = problem.get("platform", "Unknown")
-        url = problem.get("url", "")
-        problem.setdefault("scrape_date", datetime.utcnow().isoformat())
-        scrape_date = problem.get("scrape_date") or datetime.utcnow().isoformat()
-        problem.setdefault("scrape_date", scrape_date)
-
-        if not filename:
-            safe_title = re.sub(r"[^a-zA-Z0-9_-]+", "_", title)
-            filename = f"{platform}_{safe_title}.pdf"
-
-        pdf_path = self.output_dir / filename
-
-        doc = _TOCDocumentTemplate(
-            str(pdf_path),
-            pagesize=A4,
-            rightMargin=72,
-            leftMargin=72,
-            topMargin=72,
-            bottomMargin=72,
-        )
-
-        # PDF metadata
-        doc.title = title
-        doc.author = platform
-        doc.subject = url
-        doc.creator = "OJ Problem Editorial Downloader"
-
-        story: List[Any] = []
-
-        # Table of contents placeholder
-        toc = TableOfContents()
-        toc.levelStyles = [
-            ParagraphStyle(
-                name="TOCLevel1",
-                fontSize=12,
-                leftIndent=20,
-                firstLineIndent=-20,
-                spaceBefore=5,
-            ),
-            ParagraphStyle(
-                name="TOCLevel2",
-                fontSize=10,
-                leftIndent=40,
-                firstLineIndent=-20,
-                spaceBefore=2,
-            ),
-        ]
-        story.append(Paragraph("Table of Contents", self.styles["TitleCenter"]))
-        story.append(toc)
-        story.append(PageBreak())
-
-        # Summary and problem content
-        self._add_summary(story, problem)
-        story.extend(self._build_content_story(problem, section_title))
-
-        story.append(Spacer(1, 24))
-        story.append(
-            Paragraph(
-                f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
-                self.styles["ProblemText"],
-            )
-        )
-
-        doc.build(
-            story,
-            onFirstPage=lambda c, d: self._header_footer(c, d, title),
-            onLaterPages=lambda c, d: self._header_footer(c, d, title),
-        )
-
-        logger.info("Problem PDF created: %s", pdf_path)
-        return str(pdf_path)
+        
+        try:
+            # Validate input data
+            if not problem or not isinstance(problem, dict):
+                raise PDFGenerationError("Invalid problem data: empty or not a dictionary")
+            
+            # Sanitize and validate problem data
+            from utils.error_handler import ErrorRecovery
+            problem = ErrorRecovery.sanitize_content(problem)
+            
+            title = problem.get("title", "Problem").strip() or "Untitled Problem"
+            platform = problem.get("platform", "Unknown").strip() or "Unknown"
+            url = problem.get("url", "").strip()
+            
+            # Ensure required fields exist
+            problem.setdefault("scrape_date", datetime.utcnow().isoformat())
+            scrape_date = problem.get("scrape_date") or datetime.utcnow().isoformat()
+            problem.setdefault("scrape_date", scrape_date)
+            
+            # Generate safe filename
+            if not filename:
+                try:
+                    safe_title = re.sub(r"[^a-zA-Z0-9_-]+", "_", title)
+                    safe_title = safe_title[:50]  # Limit length
+                    filename = f"{platform}_{safe_title}.pdf"
+                except Exception as e:
+                    logger.warning(f"Error generating filename: {e}")
+                    filename = f"problem_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            
+            # Ensure filename is safe and has .pdf extension
+            filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+            if not filename.lower().endswith('.pdf'):
+                filename += '.pdf'
+            
+            pdf_path = self.output_dir / filename
+            
+            # Check output directory permissions and disk space
+            if not ErrorDetector.check_disk_space(str(self.output_dir), required_mb=50):
+                raise FileSystemError("Insufficient disk space for PDF generation", str(self.output_dir))
+            
+            try:
+                # Test write permissions
+                test_file = pdf_path.with_suffix('.test')
+                test_file.write_text("test")
+                test_file.unlink()
+            except Exception as e:
+                raise FileSystemError(f"No write permission in output directory: {self.output_dir}", 
+                                    str(self.output_dir), e)
+            
+            # Create document template with error handling
+            try:
+                doc = _TOCDocumentTemplate(
+                    str(pdf_path),
+                    pagesize=A4,
+                    rightMargin=72,
+                    leftMargin=72,
+                    topMargin=72,
+                    bottomMargin=72,
+                )
+                
+                # Set PDF metadata safely
+                try:
+                    doc.title = title[:100]  # Limit metadata length
+                    doc.author = platform[:50]
+                    doc.subject = url[:200] if url else "Problem Statement"
+                    doc.creator = "OJ Problem Editorial Downloader"
+                except Exception as e:
+                    logger.warning(f"Error setting PDF metadata: {e}")
+                
+            except Exception as e:
+                raise PDFGenerationError(f"Failed to create PDF document template: {str(e)}", e, str(pdf_path))
+            
+            # Build PDF content with error handling
+            try:
+                story: List[Any] = []
+                
+                # Table of contents
+                try:
+                    toc = TableOfContents()
+                    toc.levelStyles = [
+                        ParagraphStyle(
+                            name="TOCLevel1",
+                            fontSize=12,
+                            leftIndent=20,
+                            firstLineIndent=-20,
+                            spaceBefore=5,
+                        ),
+                        ParagraphStyle(
+                            name="TOCLevel2",
+                            fontSize=10,
+                            leftIndent=40,
+                            firstLineIndent=-20,
+                            spaceBefore=2,
+                        ),
+                    ]
+                    story.append(Paragraph("Table of Contents", self.styles["TitleCenter"]))
+                    story.append(toc)
+                    story.append(PageBreak())
+                except Exception as e:
+                    logger.warning(f"Failed to add table of contents: {e}")
+                    # Continue without TOC
+                
+                # Add content sections with error handling
+                try:
+                    self._add_summary(story, problem)
+                except Exception as e:
+                    logger.warning(f"Failed to add summary section: {e}")
+                
+                try:
+                    story.extend(self._build_content_story(problem, section_title))
+                except Exception as e:
+                    logger.error(f"Failed to build main content: {e}")
+                    # Add error information to PDF
+                    story.append(Paragraph("Content Generation Error", self.styles["Heading1"]))
+                    story.append(Paragraph(f"An error occurred while generating the PDF content: {str(e)}", 
+                                          self.styles["ProblemText"]))
+                
+                # Add timestamp
+                try:
+                    story.append(Spacer(1, 24))
+                    story.append(
+                        Paragraph(
+                            f"Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+                            self.styles["ProblemText"],
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to add timestamp: {e}")
+                
+            except Exception as e:
+                raise PDFGenerationError(f"Failed to build PDF content: {str(e)}", e, str(pdf_path))
+            
+            # Generate the PDF
+            try:
+                doc.build(
+                    story,
+                    onFirstPage=lambda c, d: self._header_footer(c, d, title),
+                    onLaterPages=lambda c, d: self._header_footer(c, d, title),
+                )
+                
+                # Verify the PDF was created and is valid
+                if not pdf_path.exists():
+                    raise PDFGenerationError("PDF file was not created", output_path=str(pdf_path))
+                
+                file_size = pdf_path.stat().st_size
+                if file_size < 1000:  # Less than 1KB is likely an error
+                    raise PDFGenerationError(f"PDF file is too small ({file_size} bytes), generation likely failed", 
+                                           output_path=str(pdf_path))
+                
+                logger.info(f"Problem PDF created successfully: {pdf_path} ({file_size} bytes)")
+                return str(pdf_path)
+                
+            except Exception as e:
+                # Clean up partial file
+                try:
+                    if pdf_path.exists():
+                        pdf_path.unlink()
+                except Exception:
+                    pass
+                raise PDFGenerationError(f"Failed to generate PDF: {str(e)}", e, str(pdf_path))
+            
+        except (PDFGenerationError, FileSystemError):
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in PDF generation: {e}")
+            raise PDFGenerationError(f"Unexpected error: {str(e)}", e)
 
     # ------------------------------------------------------------------
     # The following two helpers are light‑weight wrappers kept for API

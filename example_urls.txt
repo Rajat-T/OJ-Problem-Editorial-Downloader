@@ -1,0 +1,11 @@
+# Test URLs for OJ Problem Editorial Downloader
+# AtCoder examples
+https://atcoder.jp/contests/abc001/tasks/abc001_a
+https://atcoder.jp/contests/abc001/tasks/abc001_b
+
+# Codeforces examples
+https://codeforces.com/contest/1/problem/A
+https://codeforces.com/contest/1/problem/B
+
+# SPOJ examples
+https://www.spoj.com/problems/TEST/

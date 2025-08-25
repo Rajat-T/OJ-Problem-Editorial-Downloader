@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 import threading
+import traceback
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -24,6 +25,14 @@ from scraper.atcoder_scraper import AtCoderScraper
 from scraper.codeforces_scraper import CodeforcesScraper
 from scraper.spoj_scraper import SPOJScraper
 from pdf_generator.pdf_creator import PDFCreator
+
+# Import comprehensive error handling
+from utils.error_handler import (
+    URLValidationError, NetworkError, ContentMissingError, CaptchaDetectedError,
+    RateLimitError, PDFGenerationError, FileSystemError, handle_exception,
+    error_reporter, ErrorCategory, ErrorSeverity
+)
+from utils.url_validator import url_validator
 
 
 class MainWindow:
@@ -274,39 +283,177 @@ class MainWindow:
         editorial_data: Dict[str, object],
         scrape_type: str,
         url: str,
+        has_errors: bool = False,
     ) -> None:
-        """Display scraped content and allow saving to PDF."""
+        """Display scraped content and allow saving to PDF with error handling."""
 
         win = tk.Toplevel(self.root)
-        win.title("Preview")
-        text = scrolledtext.ScrolledText(win, width=80, height=25)
+        win.title("Content Preview")
+        win.geometry("900x700")
+        
+        # Add error indicator if there were issues
+        if has_errors:
+            error_frame = ttk.Frame(win)
+            error_frame.pack(fill="x", padx=5, pady=5)
+            ttk.Label(error_frame, text="⚠️ Some errors occurred during scraping. Content may be incomplete.", 
+                     foreground="orange").pack()
+        
+        # Main content area
+        text_frame = ttk.Frame(win)
+        text_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        text = scrolledtext.ScrolledText(text_frame, width=80, height=25, wrap=tk.WORD)
         text.pack(fill="both", expand=True)
+        
+        # Build content preview
         content = ""
         if problem_data:
-            content += str(problem_data.get("content", "")) + "\n"
+            content += "=== PROBLEM DATA ===\n"
+            if problem_data.get('error_occurred'):
+                content += f"⚠️ Error: {problem_data.get('error_message', 'Unknown error')}\n\n"
+            else:
+                content += f"Title: {problem_data.get('title', 'N/A')}\n"
+                content += f"Platform: {problem_data.get('platform', 'N/A')}\n\n"
+                content += f"Statement: {str(problem_data.get('problem_statement', 'N/A'))[:500]}...\n\n"
+                if problem_data.get('examples'):
+                    content += f"Examples: {len(problem_data.get('examples', []))} found\n\n"
+        
         if editorial_data:
-            content += "\n=== Editorial ===\n" + str(editorial_data.get("content", ""))
+            content += "\n=== EDITORIAL DATA ===\n"
+            if editorial_data.get('error_occurred'):
+                content += f"⚠️ Error: {editorial_data.get('error_message', 'Unknown error')}\n\n"
+            else:
+                content += f"Title: {editorial_data.get('title', 'N/A')}\n"
+                content += f"Content: {str(editorial_data.get('problem_statement', 'N/A'))[:500]}...\n\n"
+        
+        if not content:
+            content = "No content available to preview."
+        
         text.insert("1.0", content)
         text.configure(state="disabled")
 
-        btn = ttk.Frame(win)
-        btn.pack(pady=5)
+        # Button frame
+        btn_frame = ttk.Frame(win)
+        btn_frame.pack(pady=10)
 
         def save_pdf() -> None:
-            pdf_path = ""
-            if scrape_type == "problem":
-                pdf_path = self.pdf_creator.create_problem_pdf(problem_data)
-            elif scrape_type == "editorial":
-                pdf_path = self.pdf_creator.create_editorial_pdf(editorial_data)
-            else:
-                pdf_path = self.pdf_creator.create_combined_pdf(problem_data, editorial_data)
-            self._log(f"PDF saved: {pdf_path}")
-            messagebox.showinfo("Success", f"PDF saved to:\n{pdf_path}")
-            self._store_history(url)
-            win.destroy()
+            """Save content to PDF with error handling."""
+            try:
+                self._log("Generating PDF...")
+                
+                # Validate that we have some content
+                if not problem_data and not editorial_data:
+                    self._show_error_dialog("No Content", "No content available to save as PDF.")
+                    return
+                
+                # Generate PDF based on available content
+                pdf_path = ""
+                try:
+                    if scrape_type == "problem" and problem_data:
+                        pdf_path = self.pdf_creator.create_problem_pdf(problem_data)
+                    elif scrape_type == "editorial" and editorial_data:
+                        pdf_path = self.pdf_creator.create_editorial_pdf(editorial_data)
+                    elif scrape_type == "both":
+                        if problem_data and editorial_data:
+                            pdf_path = self.pdf_creator.create_combined_pdf(problem_data, editorial_data)
+                        elif problem_data:
+                            pdf_path = self.pdf_creator.create_problem_pdf(problem_data)
+                        elif editorial_data:
+                            pdf_path = self.pdf_creator.create_editorial_pdf(editorial_data)
+                        else:
+                            raise PDFGenerationError("No valid content available for PDF generation")
+                    else:
+                        raise PDFGenerationError("No matching content for the requested scrape type")
+                    
+                    self._log(f"PDF saved: {pdf_path}")
+                    
+                    # Show success message
+                    success_msg = f"PDF saved successfully:\n{pdf_path}"
+                    if has_errors:
+                        success_msg += "\n\n⚠️ Note: PDF was generated despite some scraping errors."
+                    
+                    messagebox.showinfo("Success", success_msg)
+                    self._store_history(url)
+                    win.destroy()
+                    
+                except PDFGenerationError as e:
+                    self._log(f"PDF generation error: {e}")
+                    self._show_error_dialog("PDF Generation Failed", 
+                        e.error_info.user_message or str(e))
+                except FileSystemError as e:
+                    self._log(f"File system error during PDF generation: {e}")
+                    self._show_error_dialog("File System Error", 
+                        e.error_info.user_message or str(e))
+                except Exception as e:
+                    self._log(f"Unexpected error during PDF generation: {e}")
+                    self._show_error_dialog("PDF Generation Error", 
+                        f"An unexpected error occurred while generating the PDF: {str(e)}")
+                    
+            except Exception as e:
+                self._log(f"Error in save_pdf: {e}")
+                self._show_error_dialog("Error", f"An error occurred: {str(e)}")
 
-        ttk.Button(btn, text="Save PDF", command=save_pdf).pack(side="left", padx=5)
-        ttk.Button(btn, text="Close", command=win.destroy).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Save PDF", command=save_pdf).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Close", command=win.destroy).pack(side="left", padx=5)
+        
+        # Add error summary button if there were errors
+        if has_errors:
+            def show_error_summary():
+                summary = error_reporter.get_error_summary()
+                summary_text = f"Total errors: {summary['total_errors']}\n\n"
+                summary_text += "Error categories:\n"
+                for category, count in summary.get('categories', {}).items():
+                    summary_text += f"  • {category}: {count}\n"
+                
+                if summary.get('recent_errors'):
+                    summary_text += "\nRecent errors:\n"
+                    for error in summary['recent_errors'][-3:]:
+                        summary_text += f"  • {error['message']}\n"
+                
+                self._show_error_dialog("Error Summary", summary_text)
+            
+            ttk.Button(btn_frame, text="Error Details", command=show_error_summary).pack(side="left", padx=5)
+    
+    def _show_error_dialog(self, title: str, message: str) -> None:
+        """Show user-friendly error dialog with detailed information."""
+        try:
+            # Create custom error dialog
+            dialog = tk.Toplevel(self.root)
+            dialog.title(title)
+            dialog.geometry("500x300")
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            # Center the dialog
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+            y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+            dialog.geometry(f"+{x}+{y}")
+            
+            # Error message
+            text_frame = ttk.Frame(dialog)
+            text_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            text_widget = scrolledtext.ScrolledText(text_frame, wrap=tk.WORD, height=12)
+            text_widget.pack(fill="both", expand=True)
+            text_widget.insert("1.0", message)
+            text_widget.configure(state="disabled")
+            
+            # Buttons
+            btn_frame = ttk.Frame(dialog)
+            btn_frame.pack(pady=10)
+            
+            ttk.Button(btn_frame, text="OK", command=dialog.destroy).pack(side="left", padx=5)
+            
+            def copy_to_clipboard():
+                dialog.clipboard_clear()
+                dialog.clipboard_append(message)
+                
+            ttk.Button(btn_frame, text="Copy to Clipboard", command=copy_to_clipboard).pack(side="left", padx=5)
+            
+        except Exception as e:
+            # Fallback to simple messagebox if custom dialog fails
+            messagebox.showerror(title, message)
 
     def _log(self, message: str) -> None:
         """Append a message to the log text area."""
@@ -346,60 +493,135 @@ class MainWindow:
 
         threading.Thread(target=self._scrape, args=(scrape_type,), daemon=True).start()
 
+    @handle_exception
     def _scrape(self, scrape_type: str) -> None:
-        """Perform the scraping operation."""
-
+        """
+        Perform the scraping operation with comprehensive error handling.
+        """
         self._set_progress(True)
+        error_occurred = False
+        
         try:
             problem_url = self.problem_url_var.get().strip()
             editorial_url = self.editorial_url_var.get().strip()
             output_dir = self.output_dir_var.get().strip()
 
+            # Validate inputs
             if not problem_url:
-                raise ValueError("Problem URL is required")
+                raise URLValidationError("Problem URL is required", problem_url)
+            
+            # Validate problem URL
+            url_info = url_validator.validate_url(problem_url)
+            if not url_info.is_valid:
+                error_msg = url_info.error_message or "Invalid URL format"
+                suggestions = url_validator.suggest_corrections(problem_url)
+                if suggestions:
+                    error_msg += f"\n\nSuggested corrections:\n" + "\n".join(f"• {s}" for s in suggestions[:3])
+                raise URLValidationError(error_msg, problem_url)
 
+            # Get appropriate scraper
             scraper = self._get_scraper(problem_url)
             if not scraper:
-                raise ValueError("Unsupported problem URL")
+                raise URLValidationError("Unsupported platform or invalid URL format", problem_url)
 
-            os.makedirs(output_dir, exist_ok=True)
-            self.pdf_creator.output_dir = Path(output_dir)
+            # Validate and create output directory
+            try:
+                os.makedirs(output_dir, exist_ok=True)
+                self.pdf_creator.output_dir = Path(output_dir)
+            except PermissionError:
+                raise FileSystemError(f"Permission denied: Cannot create output directory {output_dir}", output_dir)
+            except OSError as e:
+                raise FileSystemError(f"Cannot create output directory {output_dir}: {str(e)}", output_dir, e)
 
             problem_data: Dict[str, object] = {}
             editorial_data: Dict[str, object] = {}
 
+            # Scrape problem with error handling
             if scrape_type in {"problem", "both"}:
-                self._log("Scraping problem...")
-                problem_data = scraper.extract_problem_info(problem_url)
-                if not problem_data:
-                    raise ValueError("Failed to scrape problem data")
-                self._log("Problem scraped successfully")
-
-            if scrape_type in {"editorial", "both"}:
-                if not editorial_url:
-                    if problem_data and "editorial_url" in problem_data:
-                        editorial_url = str(problem_data["editorial_url"])
-                        self._log(f"Detected editorial URL: {editorial_url}")
+                try:
+                    self._log("Scraping problem...")
+                    problem_data = scraper.safe_get_problem_statement(problem_url)
+                    
+                    if not problem_data or problem_data.get('error_occurred'):
+                        error_msg = problem_data.get('error_message', 'Unknown error') if problem_data else 'No data returned'
+                        self._log(f"Problem scraping failed: {error_msg}")
+                        error_occurred = True
                     else:
-                        raise ValueError("Editorial URL is required")
+                        self._log("Problem scraped successfully")
+                        
+                except CaptchaDetectedError as e:
+                    self._log(f"CAPTCHA detected: {e.error_info.user_message}")
+                    self._show_error_dialog("CAPTCHA Detected", 
+                        "CAPTCHA detected on the website. Please try again later or access the site manually first.")
+                    return
+                except RateLimitError as e:
+                    retry_after = e.error_info.context.get('retry_after', 60)
+                    self._log(f"Rate limited: Please wait {retry_after} seconds")
+                    self._show_error_dialog("Rate Limited", 
+                        f"Too many requests. Please wait {retry_after} seconds before trying again.")
+                    return
+                except NetworkError as e:
+                    self._log(f"Network error: {e.error_info.user_message or str(e)}")
+                    error_occurred = True
+                except ContentMissingError as e:
+                    self._log(f"Content not found: {e.error_info.user_message or str(e)}")
+                    error_occurred = True
 
-                self._log("Scraping editorial...")
-                editorial_data = scraper.extract_editorial_info(editorial_url)
-                if not editorial_data:
-                    raise ValueError("Failed to scrape editorial data")
-                self._log("Editorial scraped successfully")
+            # Scrape editorial with error handling
+            if scrape_type in {"editorial", "both"}:
+                try:
+                    if not editorial_url:
+                        if problem_data and "editorial_url" in problem_data:
+                            editorial_url = str(problem_data["editorial_url"])
+                            self._log(f"Using detected editorial URL: {editorial_url}")
+                        else:
+                            self._log("No editorial URL provided and none could be detected")
+                            if scrape_type == "editorial":
+                                raise URLValidationError("Editorial URL is required", editorial_url)
+                            # For "both", continue without editorial
+                            editorial_url = None
 
-            # Preview before saving --------------------------------------
-            self.root.after(
-                0,
-                lambda: self._show_preview(
-                    problem_data, editorial_data, scrape_type, problem_url
-                ),
-            )
+                    if editorial_url:
+                        self._log("Scraping editorial...")
+                        editorial_data = scraper.safe_get_editorial(editorial_url)
+                        
+                        if not editorial_data or editorial_data.get('error_occurred'):
+                            error_msg = editorial_data.get('error_message', 'Unknown error') if editorial_data else 'No data returned'
+                            self._log(f"Editorial scraping failed: {error_msg}")
+                            error_occurred = True
+                        else:
+                            self._log("Editorial scraped successfully")
+                            
+                except Exception as e:
+                    self._log(f"Editorial scraping error: {str(e)}")
+                    error_occurred = True
 
-        except Exception as exc:  # noqa: BLE001
-            self._log(f"Error: {exc}")
-            self.root.after(0, lambda: messagebox.showerror("Error", str(exc)))
+            # Show preview with error indication
+            if problem_data or editorial_data:
+                if error_occurred:
+                    self._log("Some errors occurred during scraping, but partial content is available")
+                
+                self.root.after(
+                    0,
+                    lambda: self._show_preview(
+                        problem_data, editorial_data, scrape_type, problem_url, error_occurred
+                    ),
+                )
+            else:
+                self._show_error_dialog("Scraping Failed", 
+                    "No content could be scraped. Please check the URL and try again.")
+
+        except URLValidationError as e:
+            self._log(f"URL validation error: {e}")
+            self._show_error_dialog("Invalid URL", str(e))
+        except FileSystemError as e:
+            self._log(f"File system error: {e}")
+            self._show_error_dialog("File System Error", e.error_info.user_message or str(e))
+        except Exception as e:
+            self._log(f"Unexpected error: {e}")
+            self._show_error_dialog("Unexpected Error", 
+                f"An unexpected error occurred: {str(e)}\n\nPlease check the logs for more details.")
+            error_reporter.report_error(None, {"operation": "scrape", "error": str(e), "traceback": traceback.format_exc()})
         finally:
             self._set_progress(False)
 

@@ -1,12 +1,18 @@
 """
 AtCoder scraper for OJ Problem Editorial Downloader
-Handles scraping of AtCoder problems and editorials
+Handles scraping of AtCoder problems and editorials with comprehensive error handling
 """
 
 import re
 from typing import Dict, Any, Optional, List
 from .base_scraper import BaseScraper
 import logging
+
+# Import comprehensive error handling
+from utils.error_handler import (
+    URLValidationError, NetworkError, ContentMissingError, 
+    handle_exception, ErrorRecovery, error_reporter
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,126 +46,132 @@ class AtCoderScraper(BaseScraper):
         editorial_match = re.match(self.EDITORIAL_PATTERN, url)
         return bool(problem_match or editorial_match)
     
+    @handle_exception
     def get_problem_statement(self, url: str) -> Dict[str, Any]:
         """
-        Extract problem statement from AtCoder problem URL
+        Extract problem statement from AtCoder problem URL with comprehensive error handling
         
         Args:
             url (str): AtCoder problem URL
             
         Returns:
             Dict[str, Any]: Standardized problem information
+            
+        Raises:
+            URLValidationError: If URL format is invalid
+            NetworkError: If network errors occur
+            ContentMissingError: If problem content is not found
         """
         try:
+            # Validate URL format
             match = re.match(self.PROBLEM_PATTERN, url)
             if not match:
-                raise ValueError(f"Invalid AtCoder problem URL: {url}")
+                raise URLValidationError(f"Invalid AtCoder problem URL format: {url}", url)
 
             _, task_id = match.groups()
+            contest_id = match.group(1)
 
+            # Get page content with error handling
             soup = self.get_page_content(url)
             if not soup:
-                raise Exception("Failed to fetch problem page")
+                raise ContentMissingError(f"Failed to fetch problem page: {url}", url)
 
-            # Title
-            title_elem = soup.find('span', class_='h2') or soup.find('h1')
-            title = title_elem.get_text(strip=True) if title_elem else f"Problem {task_id.upper()}"
+            # Initialize result with defaults for graceful degradation
+            result = {
+                'title': f"Problem {task_id.upper()}",
+                'problem_statement': '',
+                'input_format': '',
+                'output_format': '',
+                'constraints': '',
+                'examples': [],
+                'time_limit': '',
+                'memory_limit': '',
+                'images': [],
+                'platform': 'AtCoder',
+                'url': url,
+                'contest_id': contest_id,
+                'task_id': task_id
+            }
 
-            # Time and memory limits
-            page_text = soup.get_text(" ", strip=True)
-            time_limit = ""
-            memory_limit = ""
-            time_match = re.search(r'Time Limit:?\s*([0-9.]+)\s*(?:sec|s)', page_text, re.IGNORECASE)
-            mem_match = re.search(r'Memory Limit:?\s*(\d+)\s*(?:MB|MiB)', page_text, re.IGNORECASE)
-            if time_match:
-                time_limit = f"{time_match.group(1)} seconds"
-            if mem_match:
-                memory_limit = f"{mem_match.group(1)} MB"
-
-            # Problem statement container (prefer English)
-            statement_elem = soup.find('div', id='task-statement')
-            if not statement_elem:
-                raise Exception("Problem statement not found")
-            lang_div = statement_elem.find(class_='lang-en') or statement_elem.find(class_='lang-ja') or statement_elem
-
-            problem_statement_parts: List[str] = []
-            input_format = ""
-            output_format = ""
-            constraints = ""
-            examples: List[Dict[str, str]] = []
-            sample_inputs: List[str] = []
-            sample_outputs: List[str] = []
-
-            parts = lang_div.find_all('div', class_='part')
-            for part in parts:
-                heading_elem = part.find(['h3', 'h2'])
-                heading = heading_elem.get_text(strip=True) if heading_elem else ""
-                heading_lower = heading.lower()
-                if heading_elem:
-                    heading_elem.decompose()
-
-                if 'sample' in heading_lower or 'example' in heading_lower:
-                    table = part.find('table')
-                    if table:
-                        inp = out = ''
-                        for row in table.find_all('tr'):
-                            th = row.find('th')
-                            pre = row.find('pre')
-                            if th and pre:
-                                th_text = th.get_text(strip=True).lower()
-                                pre_text = pre.get_text('\n', strip=True)
-                                if 'input' in th_text:
-                                    inp = pre_text
-                                elif 'output' in th_text:
-                                    out = pre_text
-                        if inp or out:
-                            examples.append({'input': inp, 'output': out, 'explanation': ''})
-                    else:
-                        pre_tags = part.find_all('pre')
-                        if len(pre_tags) == 1:
-                            text = pre_tags[0].get_text('\n', strip=True)
-                            if 'input' in heading_lower:
-                                sample_inputs.append(text)
-                            elif 'output' in heading_lower:
-                                sample_outputs.append(text)
-                        elif len(pre_tags) >= 2:
-                            inp = pre_tags[0].get_text('\n', strip=True)
-                            out = pre_tags[1].get_text('\n', strip=True)
-                            examples.append({'input': inp, 'output': out, 'explanation': ''})
-                    continue
-
-                text = part.get_text(separator='\n', strip=True)
-                if 'constraint' in heading_lower:
-                    constraints = text
-                elif 'input' in heading_lower:
-                    input_format = text
-                elif 'output' in heading_lower:
-                    output_format = text
+            # Extract title with graceful degradation
+            try:
+                title_elem = soup.find('span', class_='h2') or soup.find('h1')
+                if title_elem:
+                    result['title'] = self.clean_and_format_text(title_elem.get_text(strip=True))
+                    logger.debug(f"Extracted title: {result['title']}")
                 else:
-                    problem_statement_parts.append(text)
+                    logger.warning(f"Title not found for {url}, using default")
+            except Exception as e:
+                logger.warning(f"Error extracting title from {url}: {e}")
 
-            for inp, out in zip(sample_inputs, sample_outputs):
-                examples.append({'input': inp, 'output': out, 'explanation': ''})
+            # Extract time and memory limits with graceful degradation
+            try:
+                page_text = soup.get_text(" ", strip=True)
+                time_match = re.search(r'Time Limit:?\s*([0-9.]+)\s*(?:sec|s)', page_text, re.IGNORECASE)
+                mem_match = re.search(r'Memory Limit:?\s*(\d+)\s*(?:MB|MiB)', page_text, re.IGNORECASE)
+                
+                if time_match:
+                    result['time_limit'] = f"{time_match.group(1)} seconds"
+                    logger.debug(f"Extracted time limit: {result['time_limit']}")
+                else:
+                    logger.warning(f"Time limit not found for {url}")
+                    
+                if mem_match:
+                    result['memory_limit'] = f"{mem_match.group(1)} MB"
+                    logger.debug(f"Extracted memory limit: {result['memory_limit']}")
+                else:
+                    logger.warning(f"Memory limit not found for {url}")
+            except Exception as e:
+                logger.warning(f"Error extracting limits from {url}: {e}")
 
-            problem_statement = '\n\n'.join(part for part in problem_statement_parts if part)
+            # Extract problem statement with graceful degradation
+            try:
+                statement_elem = soup.find('div', id='task-statement')
+                if not statement_elem:
+                    logger.warning(f"Main problem statement container not found for {url}")
+                    # Try alternative selectors
+                    statement_elem = soup.find('div', class_='problem-statement') or soup.find('main')
+                
+                if statement_elem:
+                    # Prefer English content
+                    lang_div = (statement_elem.find(class_='lang-en') or 
+                               statement_elem.find(class_='lang-ja') or 
+                               statement_elem)
+                    
+                    if lang_div:
+                        result.update(self._extract_problem_sections(lang_div, url))
+                    else:
+                        logger.warning(f"No language-specific content found for {url}")
+                else:
+                    logger.error(f"No problem statement found for {url}")
+                    result['problem_statement'] = "Problem statement could not be extracted."
+                    
+            except Exception as e:
+                logger.error(f"Error extracting problem content from {url}: {e}")
+                result['problem_statement'] = f"Error extracting content: {str(e)}"
 
-            images = self.handle_images_for_pdf(lang_div, url)
+            # Extract images with graceful degradation
+            try:
+                if soup:
+                    result['images'] = self.handle_images_for_pdf(soup, url)
+                    logger.debug(f"Extracted {len(result['images'])} images from {url}")
+            except Exception as e:
+                logger.warning(f"Error extracting images from {url}: {e}")
+                result['images'] = []
 
-            return self.create_standard_format(
-                title=title,
-                problem_statement=problem_statement,
-                input_format=input_format,
-                output_format=output_format,
-                constraints=constraints,
-                examples=examples,
-                time_limit=time_limit,
-                memory_limit=memory_limit,
-                images=images,
-            )
+            # Apply error recovery sanitization
+            result = ErrorRecovery.sanitize_content(result)
+            
+            # Create standardized format
+            return self.create_standard_format(**result)
 
+        except (URLValidationError, NetworkError, ContentMissingError):
+            # Re-raise our custom exceptions
+            raise
         except Exception as e:
-            logger.error(f"Failed to extract problem statement from {url}: {e}")
-            return self.create_standard_format(title=f"Error: {str(e)}")
+            logger.error(f"Unexpected error extracting problem statement from {url}: {e}")
+            # Return fallback content instead of failing completely
+            return ErrorRecovery.create_fallback_content(url, e)
     
     def get_editorial(self, url: str) -> Dict[str, Any]:
         """

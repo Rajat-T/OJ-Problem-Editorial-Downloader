@@ -1,0 +1,9 @@
+# Test URLs for OJ Problem Editorial Downloader
+# AtCoder example URL
+https://atcoder.jp/contests/abc001/tasks/abc001_a
+
+# Codeforces example URL  
+https://codeforces.com/contest/1/problem/A
+
+# Note: These are example URLs for testing the application structure
+# Actual scraping would require the target websites to be accessible

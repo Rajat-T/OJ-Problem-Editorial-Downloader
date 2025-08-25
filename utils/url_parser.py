@@ -1,12 +1,18 @@
 """
 URL Parser for OJ Problem Editorial Downloader
-Handles URL validation, parsing, and platform detection
+Handles URL validation, parsing, and platform detection with comprehensive error handling
 """
 
 import re
 from typing import Dict, Optional, Tuple, Any, List
 from urllib.parse import urlparse, parse_qs, urljoin
 import logging
+
+# Import error handling capabilities
+from utils.error_handler import (
+    URLValidationError, handle_exception, error_reporter, 
+    ErrorCategory, ErrorSeverity
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,18 +70,30 @@ class URLParser:
         """
         self.supported_platforms = list(self.PLATFORM_PATTERNS.keys())
     
+    @handle_exception
     def identify_platform(self, url: str) -> Optional[str]:
         """
-        Identify which platform a URL belongs to
+        Identify which platform a URL belongs to with comprehensive error handling
         
         Args:
             url (str): URL to analyze
             
         Returns:
             Optional[str]: Platform name if identified, None otherwise
+            
+        Raises:
+            URLValidationError: If URL is invalid
         """
+        if not url or not url.strip():
+            raise URLValidationError("Empty URL provided", url)
+        
         try:
             normalized_url = self.normalize_url(url)
+            
+            # Validate basic URL structure
+            parsed = urlparse(normalized_url)
+            if not parsed.scheme or not parsed.netloc:
+                raise URLValidationError(f"Invalid URL structure: {url}", url)
             
             for platform, patterns in self.PLATFORM_PATTERNS.items():
                 for pattern_type, pattern_list in patterns.items():
@@ -90,9 +108,11 @@ class URLParser:
             logger.warning(f"No platform detected for URL: {url}")
             return None
             
+        except URLValidationError:
+            raise
         except Exception as e:
             logger.error(f"Error identifying platform for URL {url}: {e}")
-            return None
+            raise URLValidationError(f"Error analyzing URL: {str(e)}", url)
     
     def parse_url(self, url: str) -> Dict[str, Any]:
         """
@@ -460,15 +480,19 @@ class URLParser:
             logger.error(f"Error extracting IDs from URL {url}: {e}")
             return {'error': str(e)}
     
+    @handle_exception
     def is_valid_url(self, url: str) -> bool:
         """
-        Check if URL is valid and supported
+        Check if URL is valid and supported with comprehensive validation
         
         Args:
             url (str): URL to validate
             
         Returns:
             bool: True if valid and supported
+            
+        Raises:
+            URLValidationError: If URL validation fails
         """
         try:
             if not url or not url.strip():
@@ -477,12 +501,35 @@ class URLParser:
             # Basic URL validation
             normalized_url = self.normalize_url(url)
             parsed = urlparse(normalized_url)
-            if not all([parsed.scheme, parsed.netloc]):
+            
+            if not parsed.scheme:
                 return False
             
+            if parsed.scheme not in ['http', 'https']:
+                return False
+            
+            if not parsed.netloc:
+                return False
+            
+            # Check for invalid patterns
+            invalid_patterns = [
+                r'.*localhost.*',
+                r'.*127\.0\.0\.1.*',
+                r'.*192\.168\..*',
+                r'.*file://.*',
+                r'.*javascript:.*'
+            ]
+            
+            for pattern in invalid_patterns:
+                if re.match(pattern, normalized_url, re.IGNORECASE):
+                    return False
+            
             # Check if platform is supported
-            platform = self.identify_platform(normalized_url)
-            if not platform:
+            try:
+                platform = self.identify_platform(normalized_url)
+                if not platform:
+                    return False
+            except URLValidationError:
                 return False
             
             # Platform-specific validation

@@ -112,6 +112,62 @@ The application uses the following Python packages:
 
 ### Command Line Usage
 
+The main.py entry point provides a comprehensive command-line interface with advanced features:
+
+#### Basic Usage
+```bash
+# Start GUI (default)
+python main.py
+
+# Process single URL
+python main.py --url "https://atcoder.jp/contests/abc123/tasks/abc123_a"
+
+# Batch process from file
+python main.py --batch urls.txt
+
+# Display help
+python main.py --help
+```
+
+#### Advanced Command Line Options
+```bash
+# Custom output directory
+python main.py --url "URL" --output ./custom_pdfs
+
+# Set logging level
+python main.py --log-level DEBUG --batch urls.txt
+
+# Headless mode (no browser UI)
+python main.py --headless --batch urls.txt
+
+# No-GUI mode (command line only)
+python main.py --no-gui --batch urls.txt
+
+# Custom configuration file
+python main.py --config ./my_config.ini
+
+# Check version
+python main.py --version
+```
+
+#### Batch File Format
+Create a text file with one URL per line:
+```
+https://atcoder.jp/contests/abc123/tasks/abc123_a
+https://codeforces.com/contest/1234/problem/A
+https://www.spoj.com/problems/PRIME1/
+```
+
+#### Application Features
+- **Graceful Shutdown**: Handles Ctrl+C and cleanup automatically
+- **Error Recovery**: Automatic retry and backup creation
+- **Concurrent Processing**: Configurable parallel downloads
+- **Persistent Settings**: Saves preferences across sessions
+- **Comprehensive Logging**: File and console output with rotation
+- **Configuration Management**: INI files and JSON settings
+
+### Command Line Usage
+
 You can also use the components programmatically:
 
 ```python
