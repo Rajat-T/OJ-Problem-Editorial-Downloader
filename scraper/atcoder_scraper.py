@@ -139,8 +139,8 @@ class AtCoderScraper(BaseScraper):
                                statement_elem)
                     
                     if lang_div:
-                        # Retain the original HTML structure for rendering
-                        result['problem_statement'] = str(lang_div)
+                        # Process HTML content to clean text
+                        result['problem_statement'] = self._process_atcoder_content(lang_div)
                     else:
                         logger.warning(f"No language-specific content found for {url}")
                 else:
@@ -222,6 +222,116 @@ class AtCoderScraper(BaseScraper):
         except Exception as e:
             logger.error(f"Failed to extract editorial from {url}: {e}")
             return self.create_standard_format(title=f"Error: {str(e)}")
+    
+    def _process_atcoder_content(self, content_elem) -> str:
+        """
+        Process AtCoder HTML content and convert to clean text while preserving structure.
+        
+        Args:
+            content_elem: BeautifulSoup element containing the content
+            
+        Returns:
+            str: Cleaned and formatted text content
+        """
+        try:
+            if not content_elem:
+                return ""
+            
+            # Create a copy to avoid modifying the original
+            from bs4 import BeautifulSoup
+            content_copy = BeautifulSoup(str(content_elem), 'html.parser')
+            
+            # Remove script and style tags
+            for tag in content_copy.find_all(['script', 'style']):
+                tag.decompose()
+            
+            # Process different HTML elements appropriately
+            self._process_html_elements(content_copy)
+            
+            # Get the text content with proper spacing
+            text_content = content_copy.get_text(separator='\n', strip=True)
+            
+            # Apply text processing and cleaning
+            cleaned_text = self.clean_and_format_text(text_content)
+            
+            return cleaned_text
+            
+        except Exception as e:
+            logger.error(f"Error processing AtCoder content: {e}")
+            # Fallback to simple text extraction
+            return content_elem.get_text(separator='\n', strip=True) if content_elem else ""
+    
+    def _process_html_elements(self, soup) -> None:
+        """
+        Process HTML elements to improve text extraction.
+        
+        Args:
+            soup: BeautifulSoup object to process
+        """
+        try:
+            # Handle <var> tags - convert to variable formatting
+            for var_tag in soup.find_all('var'):
+                var_text = var_tag.get_text(strip=True)
+                if var_text:
+                    var_tag.replace_with(f"{var_text}")
+            
+            # Handle <pre> tags - preserve formatting but clean content
+            for pre_tag in soup.find_all('pre'):
+                pre_text = pre_tag.get_text(strip=False)  # Preserve internal spacing
+                if pre_text:
+                    # Clean up the text but preserve structure
+                    lines = pre_text.split('\n')
+                    cleaned_lines = []
+                    for line in lines:
+                        # Remove excessive whitespace but preserve indentation
+                        cleaned_line = re.sub(r'[ \t]+', ' ', line.rstrip())
+                        cleaned_lines.append(cleaned_line)
+                    
+                    # Join with double newlines for better separation
+                    cleaned_pre = '\n'.join(cleaned_lines)
+                    pre_tag.replace_with(f"\n\n{cleaned_pre}\n\n")
+            
+            # Handle headings - add emphasis
+            for heading in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
+                heading_text = heading.get_text(strip=True)
+                if heading_text:
+                    heading.replace_with(f"\n\n=== {heading_text} ===\n")
+            
+            # Handle paragraphs - ensure proper spacing
+            for p_tag in soup.find_all('p'):
+                p_text = p_tag.get_text(strip=True)
+                if p_text:
+                    p_tag.replace_with(f"\n{p_text}\n")
+            
+            # Handle list items
+            for li_tag in soup.find_all('li'):
+                li_text = li_tag.get_text(strip=True)
+                if li_text:
+                    li_tag.replace_with(f"\n• {li_text}")
+            
+            # Handle line breaks
+            for br_tag in soup.find_all('br'):
+                br_tag.replace_with('\n')
+            
+            # Handle emphasis tags
+            for em_tag in soup.find_all(['em', 'i']):
+                em_text = em_tag.get_text(strip=True)
+                if em_text:
+                    em_tag.replace_with(f"*{em_text}*")
+            
+            for strong_tag in soup.find_all(['strong', 'b']):
+                strong_text = strong_tag.get_text(strip=True)
+                if strong_text:
+                    strong_tag.replace_with(f"**{strong_text}**")
+            
+            # Handle code tags
+            for code_tag in soup.find_all('code'):
+                code_text = code_tag.get_text(strip=True)
+                if code_text:
+                    code_tag.replace_with(f"`{code_text}`")
+                    
+        except Exception as e:
+            logger.warning(f"Error processing HTML elements: {e}")
     
     def _extract_problem_sections(self, content_div, url: str) -> Dict[str, Any]:
         """

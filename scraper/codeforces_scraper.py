@@ -196,9 +196,9 @@ class CodeforcesScraper(BaseScraper):
                 if elem:
                     elem.decompose()
 
-            # Retain the original HTML structure for rendering
-            problem_statement_html = str(statement_elem)
-
+            # Process the statement content to clean HTML
+            problem_statement_text = self._process_codeforces_content(statement_elem)
+            
             # Sample tests
             examples: List[Dict[str, str]] = []
             if sample_elem:
@@ -216,7 +216,7 @@ class CodeforcesScraper(BaseScraper):
 
             return self.create_standard_format(
                 title=title,
-                problem_statement=problem_statement_html,  # Pass HTML content
+                problem_statement=problem_statement_text,  # Use processed text
                 input_format=input_format,
                 output_format=output_format,
                 constraints=constraints,
@@ -469,3 +469,96 @@ class CodeforcesScraper(BaseScraper):
             use_selenium=use_selenium,
             css_styles=blog_css
         )
+    
+    def _process_codeforces_content(self, content_elem) -> str:
+        """
+        Process Codeforces HTML content and convert to clean text while preserving structure.
+        
+        Args:
+            content_elem: BeautifulSoup element containing the content
+            
+        Returns:
+            str: Cleaned and formatted text content
+        """
+        try:
+            if not content_elem:
+                return ""
+            
+            # Create a copy to avoid modifying the original
+            from bs4 import BeautifulSoup
+            content_copy = BeautifulSoup(str(content_elem), 'html.parser')
+            
+            # Remove script and style tags
+            for tag in content_copy.find_all(['script', 'style']):
+                tag.decompose()
+            
+            # Process math expressions first
+            self._replace_math_expressions(content_copy)
+            
+            # Process different HTML elements appropriately
+            self._process_html_elements_cf(content_copy)
+            
+            # Get the text content with proper spacing
+            text_content = content_copy.get_text(separator='\n', strip=True)
+            
+            # Apply text processing and cleaning
+            cleaned_text = self.clean_and_format_text(text_content)
+            
+            return cleaned_text
+            
+        except Exception as e:
+            logger.error(f"Error processing Codeforces content: {e}")
+            # Fallback to simple text extraction
+            return content_elem.get_text(separator='\n', strip=True) if content_elem else ""
+    
+    def _process_html_elements_cf(self, soup) -> None:
+        """
+        Process HTML elements specific to Codeforces to improve text extraction.
+        
+        Args:
+            soup: BeautifulSoup object to process
+        """
+        try:
+            # Handle <div> tags with specific classes
+            for div_tag in soup.find_all('div'):
+                if div_tag.get('class'):
+                    class_names = ' '.join(div_tag.get('class', []))
+                    if any(cls in class_names for cls in ['problem-statement', 'header', 'title']):
+                        # Keep these but remove the div wrapper
+                        div_tag.unwrap()
+            
+            # Handle <pre> tags - preserve formatting but clean content
+            for pre_tag in soup.find_all('pre'):
+                pre_text = pre_tag.get_text(strip=False)  # Preserve internal spacing
+                if pre_text:
+                    pre_tag.replace_with(f"\n\n{pre_text.strip()}\n\n")
+            
+            # Handle headings - add emphasis
+            for heading in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
+                heading_text = heading.get_text(strip=True)
+                if heading_text:
+                    heading.replace_with(f"\n\n=== {heading_text} ===\n")
+            
+            # Handle paragraphs - ensure proper spacing
+            for p_tag in soup.find_all('p'):
+                p_text = p_tag.get_text(strip=True)
+                if p_text:
+                    p_tag.replace_with(f"\n{p_text}\n")
+            
+            # Handle line breaks
+            for br_tag in soup.find_all('br'):
+                br_tag.replace_with('\n')
+            
+            # Handle emphasis tags
+            for em_tag in soup.find_all(['em', 'i']):
+                em_text = em_tag.get_text(strip=True)
+                if em_text:
+                    em_tag.replace_with(f"*{em_text}*")
+            
+            for strong_tag in soup.find_all(['strong', 'b']):
+                strong_text = strong_tag.get_text(strip=True)
+                if strong_text:
+                    strong_tag.replace_with(f"**{strong_text}**")
+                    
+        except Exception as e:
+            logger.warning(f"Error processing Codeforces HTML elements: {e}")

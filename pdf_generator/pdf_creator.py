@@ -876,6 +876,31 @@ class PDFCreator:
         # Remove malformed HTML content that contains invalid attributes
         # This prevents ReportLab paragraph parser errors
         
+        # First, handle common AtCoder/competitive programming HTML patterns
+        # Convert <pre> tags to properly formatted text blocks
+        def replace_pre_tag(match):
+            content = match.group(1)
+            # Clean the content but preserve structure
+            lines = content.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                # Remove excessive whitespace but preserve some indentation
+                cleaned_line = re.sub(r'[ \t]+', ' ', line.rstrip())
+                if cleaned_line.strip():  # Only add non-empty lines
+                    cleaned_lines.append(cleaned_line)
+            return '\n\n' + '\n'.join(cleaned_lines) + '\n\n'
+        
+        text = re.sub(r'<pre[^>]*>(.*?)</pre>', replace_pre_tag, text, flags=re.DOTALL)
+        
+        # Handle <var> tags - these should be converted to variable notation
+        text = re.sub(r'<var[^>]*>(.*?)</var>', r'\1', text, flags=re.DOTALL)
+        
+        # Handle mathematical expressions and code formatting
+        text = re.sub(r'<code[^>]*>(.*?)</code>', r'`\1`', text, flags=re.DOTALL)
+        
+        # Convert line breaks to proper newlines BEFORE removing other tags
+        text = re.sub(r'<br\s*/?\s*>', '\n', text, flags=re.IGNORECASE)
+        
         # First, try to identify and remove problematic HTML tags entirely
         # Look for tags with invalid attribute syntax (spaces around =)
         text = re.sub(r'<[^>]*class\s*=\s*"[^"]*"[^>]*>', '', text)
@@ -898,7 +923,6 @@ class PDFCreator:
             r'<div[^>]*>',      # Remove all div tags for safety
             r'</div>',
             r'<hr\s*/?\s*>',   # Remove hr tags
-            r'<br\s*/?\s*>',   # Convert br to newlines later
         ]
         
         for pattern in problematic_patterns:
@@ -910,13 +934,13 @@ class PDFCreator:
             r'<var>([^<]*)</var>': r'\1',  # Remove var tags but keep content
             r'<var>([^<]*)< / var>': r'\1',  # Handle broken var tags with spaces
             r'<var>([^<]*)<\s*/\s*var>': r'\1',  # Handle var tags with spaced closing
-            r'<code>([^<]*)</code>': r'\1',  # Remove code tags but keep content
-            r'<strong>([^<]*)</strong>': r'\1',  # Remove strong tags
-            r'<b>([^<]*)</b>': r'\1',  # Remove bold tags
-            r'<em>([^<]*)</em>': r'\1',  # Remove emphasis tags
-            r'<i>([^<]*)</i>': r'\1',  # Remove italic tags
+            r'<code>([^<]*)</code>': r'`\1`',  # Convert code tags to backticks
+            r'<strong>([^<]*)</strong>': r'**\1**',  # Convert strong to markdown-style
+            r'<b>([^<]*)</b>': r'**\1**',  # Convert bold to markdown-style
+            r'<em>([^<]*)</em>': r'*\1*',  # Convert emphasis to markdown-style
+            r'<i>([^<]*)</i>': r'*\1*',  # Convert italic to markdown-style
             r'<u>([^<]*)</u>': r'\1',  # Remove underline tags
-            r'<h[1-6][^>]*>([^<]*)</h[1-6]>': r'\1',  # Remove heading tags but keep content
+            r'<h[1-6][^>]*>([^<]*)</h[1-6]>': r'\n\n=== \1 ===\n',  # Convert headings
             r'<p[^>]*>([^<]*)</p>': r'\1\n\n',  # Convert p tags to double newlines
             r'<li[^>]*>([^<]*)</li>': r'• \1\n',  # Convert list items to bullet points
             r'<ul[^>]*>': '',  # Remove ul tags
@@ -930,6 +954,12 @@ class PDFCreator:
         
         # Remove any remaining HTML tags that might cause issues
         text = re.sub(r'<[^>]+>', '', text)
+        
+        # Fix specific issues seen in competitive programming content
+        # Handle LaTeX-like expressions that might appear
+        text = re.sub(r'\\vdots', '⋮', text)  # Vertical dots
+        text = re.sub(r'\\ldots', '…', text)  # Horizontal dots
+        text = re.sub(r'\\cdots', '⋯', text)  # Centered dots
         
         # Clean up multiple newlines and spaces
         text = re.sub(r'\n{3,}', '\n\n', text)
