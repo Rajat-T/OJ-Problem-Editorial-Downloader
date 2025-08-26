@@ -64,6 +64,7 @@ import re
 import socket
 import signal
 from urllib.parse import urlparse, urljoin
+from pathlib import Path
 try:
     from PIL import Image
     PIL_AVAILABLE = True
@@ -72,6 +73,19 @@ except ImportError:
     Image = None
 import io
 import base64
+try:
+    from weasyprint import HTML, CSS
+    from weasyprint.text.fonts import FontConfiguration
+    WEASYPRINT_AVAILABLE = True
+except (ImportError, OSError) as e:
+    WEASYPRINT_AVAILABLE = False
+    HTML = None
+    CSS = None
+    FontConfiguration = None
+    # Log the issue but don't fail the import
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning(f"WeasyPrint not available: {e}")
 from requests.exceptions import (
     RequestException, Timeout, ConnectionError, HTTPError, 
     TooManyRedirects, InvalidURL, ChunkedEncodingError
@@ -1043,6 +1057,308 @@ class BaseScraper(ABC):
         except Exception as e:
             logger.error(f"Unexpected Selenium error for {url}: {e}")
             raise NetworkError(f"Unexpected Selenium error: {str(e)}", original_exception=e, url=url)
+    
+    def download_webpage_as_pdf_fallback(self, url: str, output_path: str, title: str = None) -> bool:
+        """
+        Fallback method to download webpage as PDF when WeasyPrint is not available.
+        
+        This method scrapes the content and uses the existing PDF generation system
+        instead of direct webpage conversion.
+        
+        Args:
+            url (str): URL of the webpage to download
+            output_path (str): Path where the PDF should be saved
+            title (str, optional): Custom title for the PDF
+            
+        Returns:
+            bool: True if PDF was successfully created, False otherwise
+        """
+        try:
+            logger.info(f"Using fallback PDF generation for: {url}")
+            
+            # Get the content using the existing scraping method
+            if hasattr(self, 'get_problem_statement') and self.is_valid_url(url):
+                # If it's a problem URL, use problem statement extraction
+                data = self.get_problem_statement(url)
+            elif hasattr(self, 'get_editorial') and 'blog' in url.lower():
+                # If it's an editorial URL, use editorial extraction
+                data = self.get_editorial(url)
+            else:
+                # Generic content extraction
+                soup = self.get_page_content(url)
+                if not soup:
+                    return False
+                
+                # Extract title
+                title_elem = soup.find('title')
+                page_title = title_elem.get_text(strip=True) if title_elem else title or "Webpage"
+                
+                # Extract main content (try common content selectors)
+                content_selectors = [
+                    '.problem-statement',
+                    '.blog-entry',
+                    '.content',
+                    '.main-content',
+                    'main',
+                    '.post-content',
+                    'article'
+                ]
+                
+                content_elem = None
+                for selector in content_selectors:
+                    content_elem = soup.select_one(selector)
+                    if content_elem:
+                        break
+                
+                if not content_elem:
+                    # Fallback to body if no specific content found
+                    content_elem = soup.find('body') or soup
+                
+                # Clean up the content
+                for tag in content_elem.find_all(['script', 'style', 'nav', 'header', 'footer']):
+                    tag.decompose()
+                
+                content_text = content_elem.get_text('\n', strip=True)
+                
+                data = self.create_standard_format(
+                    title=page_title,
+                    problem_statement=content_text
+                )
+            
+            # Use the PDF creator to generate the PDF
+            from pdf_generator.pdf_creator import PDFCreator
+            
+            pdf_creator = PDFCreator(output_dir=str(Path(output_path).parent))
+            filename = Path(output_path).name
+            
+            # Create PDF using the existing system
+            pdf_path = pdf_creator.create_problem_pdf(
+                problem=data,
+                filename=filename,
+                section_title="Webpage Content"
+            )
+            
+            return Path(pdf_path).exists()
+            
+        except Exception as e:
+            logger.error(f"Fallback PDF generation failed for {url}: {e}")
+            return False
+    
+    @handle_exception
+    def download_webpage_as_pdf(self, url: str, output_path: str, title: str = None, 
+                              use_selenium: bool = False, css_styles: str = None) -> bool:
+        """
+        Download a webpage directly as a PDF file using WeasyPrint.
+        
+        This method fetches the webpage and converts it directly to PDF format,
+        preserving the original layout and styling. This is an alternative to
+        the content scraping approach.
+        
+        Args:
+            url (str): URL of the webpage to download
+            output_path (str): Path where the PDF should be saved
+            title (str, optional): Custom title for the PDF. If None, extracted from page
+            use_selenium (bool): Whether to use Selenium to get JavaScript-rendered content
+            css_styles (str, optional): Additional CSS styles to apply
+            
+        Returns:
+            bool: True if PDF was successfully created, False otherwise
+            
+        Raises:
+            URLValidationError: If URL is invalid
+            NetworkError: If network-related errors occur
+            PDFGenerationError: If PDF generation fails
+        """
+        if not WEASYPRINT_AVAILABLE:
+            logger.warning("WeasyPrint is not available. Using fallback PDF generation method.")
+            return self.download_webpage_as_pdf_fallback(url, output_path, title)
+        
+        # Validate URL
+        if not url or not url.strip():
+            raise URLValidationError("Empty URL provided", url)
+        
+        try:
+            parsed_url = urlparse(url.strip())
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise URLValidationError(f"Invalid URL format: {url}", url)
+        except Exception as e:
+            raise URLValidationError(f"Invalid URL: {str(e)}", url)
+        
+        with ErrorContext(f"download_webpage_as_pdf", url=url):
+            try:
+                logger.info(f"Downloading webpage as PDF: {url} -> {output_path}")
+                
+                # Get HTML content
+                if use_selenium:
+                    html_content = self._get_content_selenium(url)
+                else:
+                    html_content = self._get_content_requests(url)
+                
+                if not html_content:
+                    raise ContentMissingError("No content received from webpage", url)
+                
+                # Apply custom styling for better PDF rendering
+                pdf_css = self._get_pdf_css_styles(css_styles)
+                
+                # Create HTML object with base URL for resolving relative links
+                html_doc = HTML(string=html_content, base_url=url)
+                
+                # Create CSS object if custom styles provided
+                css_objects = []
+                if pdf_css:
+                    css_objects.append(CSS(string=pdf_css))
+                
+                # Generate PDF with font configuration for better Unicode support
+                font_config = FontConfiguration()
+                
+                # Write PDF to file
+                try:
+                    html_doc.write_pdf(
+                        target=output_path,
+                        stylesheets=css_objects,
+                        font_config=font_config,
+                        presentational_hints=True,  # Use HTML presentation attributes
+                        optimize_images=True  # Optimize embedded images
+                    )
+                    
+                    logger.info(f"Successfully created PDF: {output_path}")
+                    return True
+                    
+                except Exception as pdf_error:
+                    from utils.error_handler import PDFGenerationError
+                    logger.error(f"PDF generation failed for {url}: {pdf_error}")
+                    raise PDFGenerationError(f"Failed to generate PDF: {str(pdf_error)}", 
+                                           original_exception=pdf_error)
+                
+            except (URLValidationError, ContentMissingError, NetworkError):
+                # Re-raise our custom exceptions
+                raise
+            except Exception as e:
+                from utils.error_handler import PDFGenerationError
+                logger.error(f"Unexpected error downloading webpage as PDF from {url}: {e}")
+                raise PDFGenerationError(f"Unexpected error: {str(e)}", original_exception=e)
+    
+    def _get_pdf_css_styles(self, custom_css: str = None) -> str:
+        """
+        Generate CSS styles optimized for PDF rendering.
+        
+        Args:
+            custom_css (str, optional): Additional custom CSS styles
+            
+        Returns:
+            str: CSS styles for PDF rendering
+        """
+        base_css = """
+        /* PDF Optimization Styles */
+        @page {
+            margin: 2cm;
+            size: A4;
+            @bottom-center {
+                content: counter(page);
+            }
+        }
+        
+        body {
+            font-family: 'DejaVu Sans', Arial, sans-serif;
+            font-size: 11pt;
+            line-height: 1.4;
+            color: #000;
+            background: white;
+        }
+        
+        /* Remove navigation and non-content elements */
+        nav, .navbar, .nav, .navigation, .menu,
+        .sidebar, .header, .footer, .banner,
+        .advertisement, .ads, .social-media,
+        .breadcrumb, .pagination, .comments {
+            display: none !important;
+        }
+        
+        /* Improve readability */
+        h1, h2, h3, h4, h5, h6 {
+            color: #333;
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+            page-break-after: avoid;
+        }
+        
+        p {
+            margin-bottom: 0.8em;
+            orphans: 3;
+            widows: 3;
+        }
+        
+        /* Code blocks */
+        pre, code {
+            font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+            font-size: 9pt;
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 0.5em;
+            page-break-inside: avoid;
+        }
+        
+        /* Tables */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+            page-break-inside: avoid;
+        }
+        
+        th, td {
+            border: 1px solid #ddd;
+            padding: 0.5em;
+            text-align: left;
+        }
+        
+        th {
+            background: #f0f0f0;
+            font-weight: bold;
+        }
+        
+        /* Images */
+        img {
+            max-width: 100%;
+            height: auto;
+            page-break-inside: avoid;
+        }
+        
+        /* Mathematical expressions */
+        .math, .tex, .mathjax {
+            font-family: 'Latin Modern Math', 'STIX Two Math', serif;
+        }
+        
+        /* Prevent page breaks in problematic areas */
+        .problem-statement, .editorial-content,
+        .sample-test, .constraint {
+            page-break-inside: avoid;
+        }
+        
+        /* Platform-specific improvements */
+        .problem-statement .title {
+            color: #2c3e50;
+            font-size: 1.5em;
+            margin-bottom: 1em;
+        }
+        
+        .time-limit, .memory-limit {
+            font-style: italic;
+            color: #666;
+        }
+        
+        /* Remove language selectors and other UI elements */
+        .lang-selector, .language-picker,
+        .flag, .country-flag, .user-info,
+        .rating, .contest-info {
+            display: none !important;
+        }
+        """
+        
+        if custom_css:
+            base_css += "\n\n/* Custom CSS */\n" + custom_css
+        
+        return base_css
     
     @abstractmethod
     def get_problem_statement(self, url: str) -> Dict[str, Any]:

@@ -262,3 +262,210 @@ class CodeforcesScraper(BaseScraper):
         except Exception as exc:
             logger.error(f"Failed to extract editorial from {url}: {exc}")
             return self.create_standard_format(title=f"Error: {str(exc)}")
+
+    def download_problem_as_pdf(self, url: str, output_path: str, use_selenium: bool = False) -> bool:
+        """
+        Download a Codeforces problem page directly as a PDF.
+        
+        This method downloads the webpage and converts it directly to PDF format,
+        preserving the original layout and styling without scraping content.
+        
+        Args:
+            url (str): Codeforces problem URL
+            output_path (str): Path where the PDF should be saved
+            use_selenium (bool): Whether to use Selenium for JavaScript rendering
+            
+        Returns:
+            bool: True if PDF was successfully created, False otherwise
+            
+        Raises:
+            ValueError: If URL is not a valid Codeforces problem URL
+        """
+        if not self.is_valid_url(url):
+            raise ValueError(f"Invalid Codeforces problem URL: {url}")
+        
+        # Extract problem identifier for title
+        match = re.match(self.PROBLEM_PATTERN, url)
+        title = f"Codeforces Problem"
+        if match:
+            contest_id, problem_letter = match.groups()
+            title = f"Codeforces Contest {contest_id} Problem {problem_letter}"
+        
+        # Codeforces-specific CSS for better PDF rendering
+        codeforces_css = """
+        /* Codeforces-specific PDF optimizations */
+        .lang-chooser, .lang-dropdown,
+        .roundbox .header .right,
+        .second-level-menu, .header .menu,
+        .footer, #footer,
+        .sidebar, .right-sidebar,
+        .social, .sharing,
+        .contest-nav, .contest-header,
+        .datatable .top, .datatable .bottom,
+        .pagination, .page-index {
+            display: none !important;
+        }
+        
+        /* Improve problem statement readability */
+        .problem-statement .header {
+            border-bottom: 2px solid #333;
+            padding-bottom: 0.5em;
+            margin-bottom: 1em;
+        }
+        
+        .problem-statement .title {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .time-limit, .memory-limit,
+        .input-file, .output-file {
+            font-style: italic;
+            color: #666;
+            margin: 0.2em 0;
+        }
+        
+        .section-title {
+            font-weight: bold;
+            color: #34495e;
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+        }
+        
+        .sample-tests .section-title {
+            background: #ecf0f1;
+            padding: 0.3em;
+            border-left: 4px solid #3498db;
+        }
+        
+        .input, .output {
+            margin-bottom: 1em;
+        }
+        
+        .input .title, .output .title {
+            font-weight: bold;
+            margin-bottom: 0.3em;
+        }
+        
+        pre {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            padding: 0.75rem;
+            margin: 0.5em 0;
+            font-family: 'Courier New', monospace;
+            font-size: 10pt;
+            overflow-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        
+        /* Math rendering improvements */
+        .MathJax, .math, .tex {
+            font-size: 1em;
+        }
+        
+        /* Remove ratings and user-specific content */
+        .user-rating, .rating,
+        .contest-rating, .contribution,
+        .user-info, .user-box {
+            display: none !important;
+        }
+        """
+        
+        return self.download_webpage_as_pdf(
+            url=url,
+            output_path=output_path,
+            title=title,
+            use_selenium=use_selenium,
+            css_styles=codeforces_css
+        )
+    
+    def download_editorial_as_pdf(self, url: str, output_path: str, use_selenium: bool = False) -> bool:
+        """
+        Download a Codeforces editorial/blog page directly as a PDF.
+        
+        Args:
+            url (str): Codeforces blog/editorial URL
+            output_path (str): Path where the PDF should be saved
+            use_selenium (bool): Whether to use Selenium for JavaScript rendering
+            
+        Returns:
+            bool: True if PDF was successfully created, False otherwise
+            
+        Raises:
+            ValueError: If URL is not a valid Codeforces blog URL
+        """
+        match = re.match(self.BLOG_PATTERN, url)
+        if not match:
+            raise ValueError(f"Invalid Codeforces blog URL: {url}")
+        
+        # Extract blog ID for title
+        blog_id = match.group(1)
+        title = f"Codeforces Editorial {blog_id}"
+        
+        # Codeforces blog-specific CSS
+        blog_css = """
+        /* Codeforces blog-specific PDF optimizations */
+        .lang-chooser, .second-level-menu,
+        .header .menu, .footer,
+        .sidebar, .right-sidebar,
+        .social, .sharing, .vote,
+        .comment-table, #comments,
+        .blog-entry .info .right,
+        .contribution, .rating {
+            display: none !important;
+        }
+        
+        /* Improve blog content readability */
+        .blog-entry .title {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 0.5em;
+            margin-bottom: 1em;
+        }
+        
+        .blog-entry .content {
+            line-height: 1.6;
+        }
+        
+        .blog-entry .content h1,
+        .blog-entry .content h2,
+        .blog-entry .content h3 {
+            color: #34495e;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Code blocks in editorials */
+        .blog-entry .content pre,
+        .blog-entry .content code {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            padding: 0.5rem;
+            font-family: 'Courier New', monospace;
+            font-size: 9pt;
+        }
+        
+        /* Mathematical expressions */
+        .MathJax, .math, .tex {
+            font-family: 'Latin Modern Math', serif;
+        }
+        
+        /* Remove user avatars and profile info */
+        .user-link, .user-avatar,
+        .handle, .user-rating {
+            display: none !important;
+        }
+        """
+        
+        return self.download_webpage_as_pdf(
+            url=url,
+            output_path=output_path,
+            title=title,
+            use_selenium=use_selenium,
+            css_styles=blog_css
+        )

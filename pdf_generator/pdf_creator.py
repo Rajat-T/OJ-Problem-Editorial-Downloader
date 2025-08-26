@@ -512,20 +512,147 @@ class PDFCreator:
             logger.warning("Unable to render math expression %s: %s", expression, exc)
             return None
 
-    def _render_html_to_pdf(self, html_content: str, output_path: Path) -> None:
-        """Render HTML content to a PDF file using WeasyPrint."""
+    def _render_html_to_pdf(self, html_content: str, output_path: Path, base_url: str = None, 
+                            css_styles: str = None) -> None:
+        """Render HTML content to a PDF file using WeasyPrint with enhanced features.
+        
+        Args:
+            html_content (str): HTML content to render
+            output_path (Path): Path where PDF should be saved
+            base_url (str, optional): Base URL for resolving relative links/images
+            css_styles (str, optional): Additional CSS styles to apply
+        """
         try:
-            from weasyprint import HTML
+            from weasyprint import HTML, CSS
+            from weasyprint.text.fonts import FontConfiguration
 
-            # Render the HTML content to a PDF
-            HTML(string=html_content).write_pdf(str(output_path))
+            # Create font configuration for better Unicode support
+            font_config = FontConfiguration()
+            
+            # Default CSS for PDF optimization
+            default_css = """
+            @page {
+                margin: 2cm;
+                size: A4;
+            }
+            body {
+                font-family: 'DejaVu Sans', Arial, sans-serif;
+                font-size: 11pt;
+                line-height: 1.4;
+                color: #000;
+            }
+            pre, code {
+                font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
+                background: #f5f5f5;
+                padding: 0.5em;
+                border: 1px solid #ddd;
+            }
+            """
+            
+            # Combine default and custom CSS
+            combined_css = default_css
+            if css_styles:
+                combined_css += "\n" + css_styles
+                
+            css_objects = [CSS(string=combined_css)]
+            
+            # Create HTML object with optional base URL
+            html_obj = HTML(string=html_content, base_url=base_url)
+            
+            # Generate PDF with optimizations
+            html_obj.write_pdf(
+                target=str(output_path),
+                stylesheets=css_objects,
+                font_config=font_config,
+                presentational_hints=True,
+                optimize_images=True
+            )
+            
+            logger.info(f"Successfully rendered HTML to PDF: {output_path}")
 
         except ImportError:
             logger.error("WeasyPrint is not installed. Please install it to enable HTML-to-PDF rendering.")
-            raise
+            raise PDFGenerationError("WeasyPrint dependency not available", 
+                                   original_exception=ImportError("WeasyPrint not installed"))
         except Exception as e:
             logger.error(f"Failed to render HTML to PDF: {e}")
-            raise
+            raise PDFGenerationError(f"HTML to PDF conversion failed: {str(e)}", original_exception=e)
+    
+    def create_webpage_pdf(self, url: str, output_filename: str = None, 
+                          use_selenium: bool = False, custom_css: str = None) -> str:
+        """
+        Create a PDF directly from a webpage URL.
+        
+        This method fetches the webpage and converts it to PDF using WeasyPrint,
+        preserving the original layout and styling.
+        
+        Args:
+            url (str): URL of the webpage to convert
+            output_filename (str, optional): Custom filename for the PDF. 
+                                           If None, generates from URL
+            use_selenium (bool): Whether to use Selenium for JavaScript rendering
+            custom_css (str, optional): Additional CSS styles for PDF optimization
+            
+        Returns:
+            str: Path to the generated PDF file
+            
+        Raises:
+            PDFGenerationError: If PDF generation fails
+            NetworkError: If webpage cannot be fetched
+        """
+        try:
+            # Import scraper functionality
+            from scraper.codeforces_scraper import CodeforcesScraper
+            from scraper.atcoder_scraper import AtCoderScraper
+            from scraper.spoj_scraper import SPOJScraper
+            
+            # Determine which scraper to use based on URL
+            scraper = None
+            if 'codeforces.com' in url.lower():
+                scraper = CodeforcesScraper()
+            elif 'atcoder.jp' in url.lower():
+                scraper = AtCoderScraper()
+            elif 'spoj.com' in url.lower():
+                scraper = SPOJScraper()
+            else:
+                # Use Codeforces scraper as default (it has the most robust PDF download)
+                scraper = CodeforcesScraper()
+            
+            # Generate output filename if not provided
+            if output_filename is None:
+                from urllib.parse import urlparse
+                parsed_url = urlparse(url)
+                domain = parsed_url.netloc.replace('.', '_')
+                path_part = parsed_url.path.replace('/', '_').strip('_')
+                if path_part:
+                    output_filename = f"{domain}_{path_part}.pdf"
+                else:
+                    output_filename = f"{domain}.pdf"
+            
+            # Ensure .pdf extension
+            if not output_filename.endswith('.pdf'):
+                output_filename += '.pdf'
+            
+            output_path = self.output_dir / output_filename
+            
+            # Use the base scraper's webpage-to-PDF functionality
+            success = scraper.download_webpage_as_pdf(
+                url=url,
+                output_path=str(output_path),
+                use_selenium=use_selenium,
+                css_styles=custom_css
+            )
+            
+            if not success:
+                raise PDFGenerationError(f"Failed to generate PDF from webpage: {url}")
+            
+            return str(output_path)
+            
+        except Exception as e:
+            if isinstance(e, PDFGenerationError):
+                raise
+            logger.error(f"Error creating webpage PDF from {url}: {e}")
+            raise PDFGenerationError(f"Webpage PDF creation failed: {str(e)}", original_exception=e)
 
     def _convert_latex_symbols(self, text: str) -> str:
         """Convert LaTeX mathematical symbols to Unicode equivalents with enhanced coverage.

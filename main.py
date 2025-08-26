@@ -377,13 +377,14 @@ class ApplicationManager:
             logging.error(f"Error during GUI cleanup: {e}")
     
     @handle_exception
-    def run_batch_processing(self, urls: List[str], output_dir: Optional[str] = None):
+    def run_batch_processing(self, urls: List[str], output_dir: Optional[str] = None, direct_pdf: bool = False):
         """
         Run batch processing for multiple URLs with comprehensive error handling.
         
         Args:
             urls: List of URLs to process
             output_dir: Output directory (optional)
+            direct_pdf: Whether to use direct webpage-to-PDF conversion
             
         Returns:
             Tuple[int, int]: (successful_count, failed_count)
@@ -419,7 +420,7 @@ class ApplicationManager:
                 
                 for url in urls:
                     try:
-                        future = executor.submit(self._process_single_url, url, output_dir)
+                        future = executor.submit(self._process_single_url, url, output_dir, direct_pdf)
                         futures.append((url, future))
                     except Exception as e:
                         logging.error(f"Failed to submit URL for processing: {url}: {e}")
@@ -453,13 +454,14 @@ class ApplicationManager:
             self._handle_error(e, "batch_processing")
             return 0, len(urls)
     
-    def _process_single_url(self, url: str, output_dir: str) -> bool:
+    def _process_single_url(self, url: str, output_dir: str, direct_pdf: bool = False) -> bool:
         """
         Process a single URL for batch processing.
         
         Args:
             url: URL to process
             output_dir: Output directory
+            direct_pdf: Whether to use direct webpage-to-PDF conversion
             
         Returns:
             bool: True if successful, False otherwise
@@ -483,28 +485,70 @@ class ApplicationManager:
             
             scraper = self.scrapers[platform]
             
-            # Scrape content
-            problem_data = scraper.get_problem_statement(url)
-            if not problem_data:
-                logging.error(f"Failed to scrape problem data for: {url}")
-                return False
-            
-            # Generate PDF
-            filename = self._generate_filename(problem_data, platform)
-            
             # Ensure output directory exists
             Path(output_dir).mkdir(parents=True, exist_ok=True)
             
-            # Set the output directory for the PDF creator
-            self.pdf_creator.output_dir = Path(output_dir)
+            if direct_pdf:
+                # Use direct webpage-to-PDF conversion
+                logging.info(f"Using direct PDF conversion for: {url}")
+                
+                # Generate filename based on URL
+                from urllib.parse import urlparse
+                parsed_url = urlparse(url)
+                domain = parsed_url.netloc.replace('.', '_')
+                path_part = parsed_url.path.replace('/', '_').strip('_')
+                
+                if path_part:
+                    filename = f"{domain}_{path_part}.pdf"
+                else:
+                    filename = f"{domain}.pdf"
+                
+                output_path = Path(output_dir) / filename
+                
+                # Use the scraper's direct PDF download method
+                if hasattr(scraper, 'download_problem_as_pdf'):
+                    success = scraper.download_problem_as_pdf(
+                        url=url,
+                        output_path=str(output_path),
+                        use_selenium=False  # Can be made configurable
+                    )
+                else:
+                    # Fallback to generic webpage download
+                    success = scraper.download_webpage_as_pdf(
+                        url=url,
+                        output_path=str(output_path)
+                    )
+                
+                if success:
+                    logging.info(f"Direct PDF created: {output_path}")
+                    return True
+                else:
+                    logging.error(f"Failed to create direct PDF for: {url}")
+                    return False
             
-            try:
-                output_path = self.pdf_creator.create_problem_pdf(problem_data, filename)
-                logging.info(f"PDF created: {output_path}")
-                return True
-            except Exception as e:
-                logging.error(f"Failed to create PDF for {url}: {e}")
-                return False
+            else:
+                # Use traditional scraping + PDF generation
+                logging.info(f"Using traditional scraping for: {url}")
+                
+                # Scrape content
+                problem_data = scraper.get_problem_statement(url)
+                if not problem_data:
+                    logging.error(f"Failed to scrape problem data for: {url}")
+                    return False
+                
+                # Generate PDF
+                filename = self._generate_filename(problem_data, platform)
+                
+                # Set the output directory for the PDF creator
+                self.pdf_creator.output_dir = Path(output_dir)
+                
+                try:
+                    output_path = self.pdf_creator.create_problem_pdf(problem_data, filename)
+                    logging.info(f"Traditional PDF created: {output_path}")
+                    return True
+                except Exception as e:
+                    logging.error(f"Failed to create traditional PDF for {url}: {e}")
+                    return False
                 
         except Exception as e:
             logging.error(f"Error processing URL {url}: {e}")
@@ -697,11 +741,13 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s                                    # Start GUI mode
-  %(prog)s --batch urls.txt                  # Batch process URLs from file
-  %(prog)s --batch urls.txt --output ./pdfs  # Batch with custom output
-  %(prog)s --url "https://atcoder.jp/..."     # Process single URL
-  %(prog)s --log-level DEBUG                 # Enable debug logging
+  %(prog)s                                          # Start GUI mode
+  %(prog)s --batch urls.txt                        # Batch process URLs from file
+  %(prog)s --batch urls.txt --output ./pdfs        # Batch with custom output
+  %(prog)s --url "https://atcoder.jp/..."           # Process single URL
+  %(prog)s --url "https://codeforces.com/..." --direct-pdf  # Direct webpage-to-PDF
+  %(prog)s --batch urls.txt --direct-pdf           # Batch direct PDF download
+  %(prog)s --log-level DEBUG                       # Enable debug logging
         """
     )
     
@@ -746,6 +792,12 @@ Examples:
         '--no-gui',
         action='store_true',
         help='Disable GUI mode (requires --batch or --url)'
+    )
+    
+    parser.add_argument(
+        '--direct-pdf',
+        action='store_true',
+        help='Download webpages directly as PDF (preserves original layout)'
     )
     
     parser.add_argument(
@@ -801,7 +853,7 @@ def main():
                 
                 logging.info(f"Processing {len(urls)} URLs from batch file")
                 successful, failed = app_manager.run_batch_processing(
-                    urls, args.output
+                    urls, args.output, direct_pdf=args.direct_pdf
                 )
                 
                 if failed > 0:
@@ -818,7 +870,7 @@ def main():
             # Single URL processing mode
             logging.info(f"Processing single URL: {args.url}")
             successful, failed = app_manager.run_batch_processing(
-                [args.url], args.output
+                [args.url], args.output, direct_pdf=args.direct_pdf
             )
             
             if failed > 0:
