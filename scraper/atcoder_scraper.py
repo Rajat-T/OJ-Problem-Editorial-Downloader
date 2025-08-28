@@ -581,3 +581,498 @@ class AtCoderScraper(BaseScraper):
             logger.warning(f"Error in fallback example extraction: {e}")
             
         return examples
+    
+    def download_problem_as_pdf(self, url: str, output_path: str, use_selenium: bool = False) -> bool:
+        """
+        Download an AtCoder problem page directly as a PDF with LLM optimization.
+        
+        This method downloads the webpage and converts it directly to PDF format,
+        preserving the original layout and styling while optimizing for LLM training.
+        
+        Args:
+            url (str): AtCoder problem URL
+            output_path (str): Path where the PDF should be saved
+            use_selenium (bool): Whether to use Selenium for JavaScript rendering
+            
+        Returns:
+            bool: True if PDF was successfully created, False otherwise
+            
+        Raises:
+            ValueError: If URL is not a valid AtCoder problem URL
+        """
+        if not self.is_valid_url(url):
+            raise ValueError(f"Invalid AtCoder problem URL: {url}")
+        
+        # Extract problem identifier for title
+        try:
+            match = re.match(self.PROBLEM_PATTERN, url)
+            if match:
+                contest_id, task_id = match.groups()
+                title = f"AtCoder {contest_id.upper()} Problem {task_id.upper()}"
+            else:
+                title = "AtCoder Problem"
+        except:
+            title = "AtCoder Problem"
+        
+        # AtCoder-specific CSS for better PDF rendering with LLM optimization
+        atcoder_css = """
+        /* AtCoder-specific PDF optimizations */
+        .lang-chooser, .second-level-menu,
+        .header .menu, .footer,
+        .sidebar, .right-sidebar,
+        .social, .sharing, .vote,
+        .comment-table, #comments,
+        .contribution, .rating,
+        .user-link, .user-avatar,
+        .handle, .user-rating,
+        .login-reminder, .register-link,
+        .advertisement, .ads-container,
+        .cookie-notice, .gdpr-banner,
+        .share-buttons, .social-share,
+        .edit-button, .report-button,
+        .breadcrumbs, .contest-navigation,
+        .problem-tags, .problem-stats,
+        .submit-button, .my-submissions {
+            display: none !important;
+        }
+        
+        /* Improve problem content readability */
+        #task-statement, .problem-statement {
+            background: #f8f9fa;
+            padding: 1.5em;
+            margin: 1em 0;
+            border-left: 4px solid #007bff;
+            page-break-inside: avoid;
+        }
+        
+        #task-statement::before,
+        .problem-statement::before {
+            content: "[PROBLEM_STATEMENT]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 1em;
+            font-weight: bold;
+        }
+        
+        #task-statement h1,
+        #task-statement h2,
+        #task-statement h3,
+        .problem-statement h1,
+        .problem-statement h2,
+        .problem-statement h3 {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 0.5em;
+            margin-bottom: 1em;
+        }
+        
+        #task-statement h1::before,
+        #task-statement h2::before,
+        #task-statement h3::before,
+        .problem-statement h1::before,
+        .problem-statement h2::before,
+        .problem-statement h3::before {
+            content: "[PROBLEM_TITLE] ";
+            font-size: 0.7em;
+            color: #666;
+            margin-right: 0.5em;
+        }
+        
+        /* Input/Output format sections */
+        .input-format, .output-format {
+            background: #e8f5e8;
+            padding: 1em;
+            margin: 1em 0;
+            border: 1px solid #28a745;
+            border-radius: 4px;
+        }
+        
+        .input-format::before {
+            content: "[INPUT_FORMAT]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+            font-weight: bold;
+        }
+        
+        .output-format::before {
+            content: "[OUTPUT_FORMAT]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+            font-weight: bold;
+        }
+        
+        /* Constraints section */
+        .constraints {
+            background: #fff3cd;
+            padding: 1em;
+            margin: 1em 0;
+            border: 1px solid #ffc107;
+            border-radius: 4px;
+        }
+        
+        .constraints::before {
+            content: "[CONSTRAINTS]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+            font-weight: bold;
+        }
+        
+        /* Sample input/output sections */
+        .sample-input, .sample-output {
+            background: #f8f9fa;
+            padding: 1em;
+            margin: 1em 0;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 10pt;
+            page-break-inside: avoid;
+        }
+        
+        .sample-input::before {
+            content: "[SAMPLE_INPUT]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+            font-weight: bold;
+        }
+        
+        .sample-output::before {
+            content: "[SAMPLE_OUTPUT]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+            font-weight: bold;
+        }
+        
+        /* Code blocks */
+        pre, code {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            padding: 0.75rem;
+            margin: 0.5em 0;
+            font-family: 'Courier New', monospace;
+            font-size: 9pt;
+            overflow-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        
+        pre::before {
+            content: "[CODE_BLOCK]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Mathematical expressions */
+        .MathJax, .math, .tex {
+            font-family: 'Latin Modern Math', serif;
+        }
+        
+        .MathJax::before,
+        .math::before,
+        .tex::before {
+            content: "[MATH]";
+            font-size: 0.8em;
+            color: #666;
+            margin-right: 0.3em;
+        }
+        
+        /* Tables */
+        table::before {
+            content: "[TABLE]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Lists */
+        ul::before {
+            content: "[LIST]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        ol::before {
+            content: "[NUMBERED_LIST]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        /* Images */
+        img::before {
+            content: "[IMAGE: " attr(alt) "]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        /* Enhanced problem components for LLM training */
+        .time-limit::before {
+            content: "[TIME_LIMIT] ";
+            font-weight: bold;
+        }
+        
+        .memory-limit::before {
+            content: "[MEMORY_LIMIT] ";
+            font-weight: bold;
+        }
+        
+        .example::before {
+            content: "[EXAMPLE] ";
+            font-weight: bold;
+        }
+        
+        .note::before {
+            content: "[NOTE] ";
+            font-weight: bold;
+        }
+        
+        .hint::before {
+            content: "[HINT] ";
+            font-weight: bold;
+        }
+        
+        .source::before {
+            content: "[SOURCE] ";
+            font-weight: bold;
+        }
+        
+        .tags::before {
+            content: "[TAGS] ";
+            font-weight: bold;
+        }
+        
+        .difficulty::before {
+            content: "[DIFFICULTY] ";
+            font-weight: bold;
+        }
+        
+        .author::before {
+            content: "[AUTHOR] ";
+            font-weight: bold;
+        }
+        
+        /* Language-specific content */
+        .lang-en, .lang-ja {
+            display: block !important;
+        }
+        
+        /* Part sections */
+        .part {
+            margin: 1em 0;
+            padding: 0.8em;
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+        }
+        
+        .part::before {
+            content: "[SECTION]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        """
+        
+        return self.download_webpage_as_pdf(
+            url=url,
+            output_path=output_path,
+            title=title,
+            use_selenium=use_selenium,
+            css_styles=atcoder_css
+        )
+    
+    def download_editorial_as_pdf(self, url: str, output_path: str, use_selenium: bool = False) -> bool:
+        """
+        Download an AtCoder editorial page directly as a PDF with LLM optimization.
+        
+        Args:
+            url (str): AtCoder editorial URL
+            output_path (str): Path where the PDF should be saved
+            use_selenium (bool): Whether to use Selenium for JavaScript rendering
+            
+        Returns:
+            bool: True if PDF was successfully created, False otherwise
+            
+        Raises:
+            ValueError: If URL is not a valid AtCoder editorial URL
+        """
+        if not self.is_valid_url(url):
+            raise ValueError(f"Invalid AtCoder editorial URL: {url}")
+        
+        # Extract editorial identifier for title
+        try:
+            match = re.match(self.EDITORIAL_PATTERN, url)
+            if match:
+                contest_id = match.group(1)
+                title = f"AtCoder {contest_id.upper()} Editorial"
+            else:
+                title = "AtCoder Editorial"
+        except:
+            title = "AtCoder Editorial"
+        
+        # AtCoder editorial-specific CSS with LLM optimization
+        editorial_css = """
+        /* AtCoder editorial-specific PDF optimizations */
+        .lang-chooser, .second-level-menu,
+        .header .menu, .footer,
+        .sidebar, .right-sidebar,
+        .social, .sharing, .vote,
+        .comment-table, #comments,
+        .contribution, .rating,
+        .user-link, .user-avatar,
+        .handle, .user-rating,
+        .login-reminder, .register-link,
+        .advertisement, .ads-container,
+        .cookie-notice, .gdpr-banner,
+        .share-buttons, .social-share,
+        .edit-button, .report-button,
+        .breadcrumbs, .contest-navigation,
+        .problem-tags, .problem-stats,
+        .submit-button, .my-submissions {
+            display: none !important;
+        }
+        
+        /* Improve editorial content readability */
+        #main-container, #editorial {
+            background: #f8f9fa;
+            padding: 1.5em;
+            margin: 1em 0;
+            border-left: 4px solid #007bff;
+            page-break-inside: avoid;
+        }
+        
+        #main-container::before,
+        #editorial::before {
+            content: "[EDITORIAL_CONTENT]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 1em;
+            font-weight: bold;
+        }
+        
+        #main-container h1,
+        #main-container h2,
+        #main-container h3,
+        #editorial h1,
+        #editorial h2,
+        #editorial h3 {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 0.5em;
+            margin-bottom: 1em;
+        }
+        
+        #main-container h1::before,
+        #main-container h2::before,
+        #main-container h3::before,
+        #editorial h1::before,
+        #editorial h2::before,
+        #editorial h3::before {
+            content: "[EDITORIAL_TITLE] ";
+            font-size: 0.7em;
+            color: #666;
+            margin-right: 0.5em;
+        }
+        
+        /* Code blocks */
+        pre, code {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            padding: 0.75rem;
+            margin: 0.5em 0;
+            font-family: 'Courier New', monospace;
+            font-size: 9pt;
+            overflow-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        
+        pre::before {
+            content: "[CODE_BLOCK]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Mathematical expressions */
+        .MathJax, .math, .tex {
+            font-family: 'Latin Modern Math', serif;
+        }
+        
+        .MathJax::before,
+        .math::before,
+        .tex::before {
+            content: "[MATH]";
+            font-size: 0.8em;
+            color: #666;
+            margin-right: 0.3em;
+        }
+        
+        /* Tables */
+        table::before {
+            content: "[TABLE]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Lists */
+        ul::before {
+            content: "[LIST]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        ol::before {
+            content: "[NUMBERED_LIST]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        /* Images */
+        img::before {
+            content: "[IMAGE: " attr(alt) "]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        """
+        
+        return self.download_webpage_as_pdf(
+            url=url,
+            output_path=output_path,
+            title=title,
+            use_selenium=use_selenium,
+            css_styles=editorial_css
+        )

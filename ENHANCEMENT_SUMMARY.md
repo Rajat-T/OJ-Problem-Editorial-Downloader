@@ -1,172 +1,123 @@
-# Enhanced PDF Generation for Competitive Programming Problems
+# OJ Problem Editorial Downloader - Enhancement Summary
 
-## Summary of Improvements
+## Overview
+This document summarizes the enhancements made to the OJ Problem Editorial Downloader to transform it into a more robust webpage-to-PDF downloader optimized for competitive programming platforms and LLM training.
 
-This document outlines the comprehensive enhancements made to ensure that downloaded PDF output of programming problems from SPOJ, AtCoder, and Codeforces closely matches the visual and structural layout of the original problem webpage.
+## Key Enhancements
 
-## 🔧 Core Enhancements Implemented
+### 1. Direct PDF Generation for All Platforms
+Added `download_problem_as_pdf()` and `download_editorial_as_pdf()` methods to all scrapers:
+- **CodeforcesScraper** - Enhanced with platform-specific CSS optimizations
+- **AtCoderScraper** - Added direct PDF download functionality with semantic markup
+- **SPOJScraper** - Added direct PDF download functionality with LLM optimization
+- **CodeChefScraper** - Enhanced with better CSS styling and LLM markers
 
-### 1. 📚 Enhanced LaTeX and Mathematical Symbol Conversion
+### 2. LLM Training Optimization
+Enhanced the PDF generation with semantic markup for better LLM training:
+- **Content Structure Markers**: `[PROBLEM_TITLE]`, `[PROBLEM_STATEMENT]`, `[INPUT_FORMAT]`, etc.
+- **Code Block Identification**: Clear markers for code snippets
+- **Mathematical Notation**: Special handling for mathematical expressions
+- **Sample Input/Output**: Clear separation of test cases
+- **Metadata Preservation**: Time limits, memory constraints, and other problem details
 
-**File**: `pdf_generator/pdf_creator.py` - `_convert_latex_symbols()` method
+### 3. Platform-Specific Optimizations
+Each platform now has custom CSS for optimal PDF rendering:
+- **Codeforces**: Optimized for contest problems and blog posts
+- **AtCoder**: Enhanced for Japanese/English content and section formatting
+- **SPOJ**: Streamlined for classic problem format
+- **CodeChef**: Improved for contest and practice problems
 
-**Improvements**:
-- **Comprehensive Unicode Mapping**: Expanded from ~50 to 150+ LaTeX commands
-- **Mathematical Operators**: ≤, ≥, ≠, ×, ÷, ±, ∩, ∪, ∈, ∅, etc.
-- **Greek Letters**: Complete set (α, β, γ, δ, ε, θ, λ, μ, π, σ, φ, ω, Α, Β, Γ, Δ, etc.)
-- **Arrows**: →, ←, ↔, ⇒, ⇐, ⇔, ↑, ↓, etc.
-- **Set Theory**: ∩, ∪, ⊂, ⊃, ⊆, ⊇, ∈, ∉, ∅
-- **Logic Symbols**: ∧, ∨, ¬, ∀, ∃, ⊢, ⊨
-- **Brackets**: ⌊, ⌋, ⌈, ⌉, ⟨, ⟩
-- **Blackboard Bold**: ℕ, ℤ, ℚ, ℝ, ℂ
+### 4. Fallback Mechanisms
+Robust error handling with graceful degradation:
+- **WeasyPrint Fallback**: When direct PDF generation fails, falls back to traditional scraping
+- **Content Recovery**: When scraping fails, generates PDF with available information
+- **Rate Limiting**: Respects server resources with configurable delays
 
-**Advanced Features**:
-- Intelligent fraction handling: `\frac{a}{b}` → `(a)/(b)` or `a/b`
-- Root symbols: `\sqrt{x}` → `√(x)`, `\sqrt[n]{x}` → `n√(x)`
-- Function preservation: `\sin`, `\cos`, `\log`, `\max`, `\min`, etc.
-- Equation environment processing
-- Enhanced spacing control
+### 5. Improved Example Data
+Updated `example_urls.txt` with comprehensive test cases for all platforms:
+- AtCoder ABC/ARC/AGC problems
+- Codeforces contest and problemset formats
+- SPOJ classic problems
+- CodeChef practice and contest problems
 
-### 2. 🎯 Advanced Text Processing for Competitive Programming
+## Usage Examples
 
-**File**: `pdf_generator/pdf_creator.py` - `_improve_text_formatting()` method
+### Command Line
+```bash
+# Convert single problem to LLM-optimized PDF
+python main.py --url "https://codeforces.com/problemset/problem/4/A" --output ./pdfs
 
-**Pattern Recognition & Correction**:
-- **Case Subscripts**: `case1` → `case[1]`, `output1` → `output[1]`
-- **Variable Subscripts**: `A1` → `A[1]`, `N_max` → `N[max]`
-- **Black Square Elimination**: `case■1■` → `case[1]`, `A■i■` → `A[i]`
-- **Unicode Subscript Conversion**: `A₁` → `A[1]`, `case₁` → `case[1]`
-- **Corrupted Pattern Recovery**: 
-  - `casenTn` → `case_T`
-  - `outputnin` → `output_i`
-  - `AnNn` → `A_N`
+# Batch process with LLM optimization (default)
+python main.py --batch example_urls.txt --output ./pdfs
 
-**Enhanced Character Handling**:
-- **Problematic Unicode**: Removal of 25+ problematic characters (■, ▀, ▁, etc.)
-- **HTML Entities**: Comprehensive decoding (&nbsp;, &times;, &plusmn;, etc.)
-- **Spacing Normalization**: Proper operator spacing (a+b → a + b = c)
-- **Constraint Formatting**: `1≤T≤100` → `1 ≤ T ≤ 100`
+# Traditional scraping mode
+python main.py --url "URL" --traditional-mode
+```
 
-### 3. 🖼️ Intelligent Image Filtering System
+### Python API
+```python
+from scraper.codeforces_scraper import CodeforcesScraper
 
-**File**: `scraper/base_scraper.py` - `_should_exclude_image()` method
+scraper = CodeforcesScraper()
+success = scraper.download_problem_as_pdf(
+    url="https://codeforces.com/problemset/problem/4/A",
+    output_path="./problem.pdf"
+)
+```
 
-**Exclusion Patterns**:
-- **Language Flags**: JP, EN, GB, US, CN flag images
-- **UI Elements**: Navigation, menus, logos, buttons, headers, footers
-- **Social Media**: Twitter, Facebook, GitHub, LinkedIn icons
-- **Advertisements**: Google ads, sponsor images, banners
-- **Decorative Elements**: Favicons, sprites, thumbnails, avatars
-- **Size-based**: Very small images (≤32x32), 1x1 pixel trackers
-- **Platform-specific**:
-  - AtCoder: `/img/lang/`, `/common/img/`, rating indicators
-  - Codeforces: `/images/flags/`, country indicators, social icons
-  - SPOJ: `/gfx/flags/`, sphere logos, navigation elements
+## LLM-Optimized Output Format
 
-**Content Preservation**:
-- **Problem Diagrams**: Algorithm flowcharts, data structures
-- **Mathematical Illustrations**: Formula images, geometric figures
-- **Sample Visualizations**: Input/output examples, graphs
-- **Educational Content**: Tutorials, explanations, proofs
+The generated PDFs include semantic markers that make them ideal for LLM training:
 
-### 4. 📄 Enhanced Code Block and Table Rendering
+```
+[PROBLEM_TITLE] A. Watermelon
+[PROBLEM_STATEMENT] One hot summer day Pete and his friend Billy decided to buy a watermelon...
+[CONSTRAINTS] 1 ≤ w ≤ 100
+[INPUT_FORMAT] The first line contains an integer w (1 ≤ w ≤ 100)...
+[SAMPLE_INPUT] 8
+[SAMPLE_OUTPUT] YES
+```
 
-**File**: `pdf_generator/pdf_creator.py` - `_highlight_code()` and `_add_table()` methods
+## Supported Platforms
 
-**Code Enhancement Features**:
-- **Indentation Preservation**: Maintains original code structure
-- **Intelligent Language Detection**: C++, Python, Java, JavaScript recognition
-- **Enhanced Syntax Highlighting**: Better color support, bold/italic formatting
-- **Tab Conversion**: Consistent 4-space indentation
-- **Mathematical Symbol Support**: LaTeX conversion in code comments
-- **Format Block Detection**: Special styling for competitive programming format specs
+1. **Codeforces** - Contest problems, problemset, and blog editorials
+2. **AtCoder** - ABC, ARC, AGC problems and contest editorials
+3. **SPOJ** - Classic programming challenges
+4. **CodeChef** - Practice and contest problems
 
-**Table Improvements**:
-- **Enhanced Styling**: Better borders, alignment, spacing
-- **Data Type Handling**: Improved constraint and example table formatting
-- **Responsive Sizing**: Adaptive column widths
-- **Error Recovery**: Graceful handling of malformed table data
+## Technical Improvements
 
-### 5. 🏗️ Improved HTML Content Extraction
+### Error Handling
+- Comprehensive exception handling with detailed error reporting
+- Graceful degradation when content is partially available
+- Automatic retry mechanisms for transient failures
 
-**File**: `scraper/base_scraper.py` - `clean_and_format_text()` method
+### Performance
+- Concurrent processing for batch operations
+- Configurable rate limiting to respect server resources
+- Efficient caching for images and repeated content
 
-**Structure Preservation**:
-- **Mathematical Expression Protection**: Temporary placeholders for LaTeX
-- **Indentation Maintenance**: Code block structure preservation
-- **Line Break Normalization**: Intelligent paragraph separation
-- **Format Variable Detection**: Competitive programming format patterns
-- **Enhanced Spacing**: Proper mathematical operator spacing
+### Maintainability
+- Modular architecture with platform-specific scrapers
+- Consistent API across all platforms
+- Extensive logging for debugging and monitoring
 
-## 🧪 Comprehensive Testing Suite
+## Testing Results
 
-**File**: `tests/test_enhanced_pdf_generation.py`
+The enhancements have been tested with the following results:
+- ✅ Codeforces: Direct PDF generation working
+- ✅ SPOJ: Direct PDF generation working  
+- ⚠️ AtCoder: Some URLs may have access issues
+- ⚠️ CodeChef: CAPTCHA detection on some pages
 
-**Test Coverage**:
-- **LaTeX Symbol Conversion**: 150+ symbol mappings
-- **Competitive Programming Patterns**: Case handling, subscripts, corrupted text
-- **Black Square Elimination**: Unicode character removal
-- **Mathematical Expression Preservation**: Complex formula handling  
-- **Image Filtering Logic**: UI exclusion vs content preservation
-- **HTML Entity Processing**: Comprehensive entity decoding
-- **Integration Testing**: End-to-end PDF generation validation
+## Future Improvements
 
-## 📋 Key Benefits Achieved
+1. **Enhanced CAPTCHA Handling**: Better mechanisms to work around CAPTCHA protections
+2. **Additional Platforms**: Support for more competitive programming sites
+3. **Advanced LLM Features**: More sophisticated semantic markup and content analysis
+4. **Performance Optimization**: Faster processing and smaller PDF output
+5. **User Interface**: Enhanced GUI with platform-specific features
 
-### Visual Fidelity
-- **Mathematical Notation**: Exact preservation of symbols, formulas, expressions
-- **Layout Consistency**: Maintains original webpage structure and indentation
-- **Special Characters**: Proper rendering of subscripts, superscripts, HTML entities
-- **Code Formatting**: Preserves syntax highlighting and structure
+## Conclusion
 
-### Content Quality
-- **No Symbol Loss**: Zero degradation of mathematical content
-- **Format Preservation**: Maintains competitive programming format specifications
-- **Clean Output**: Eliminates visual artifacts and corrupted characters
-- **Intelligent Processing**: Context-aware text and image handling
-
-### Platform Compatibility
-- **AtCoder**: Enhanced handling of contest problems and editorials
-- **Codeforces**: Improved blog and problem statement processing
-- **SPOJ**: Better problem format recognition and rendering
-
-## 🔄 Implementation Status
-
-| Enhancement | Status | Files Modified |
-|-------------|--------|----------------|
-| LaTeX Symbol Conversion | ✅ Complete | `pdf_generator/pdf_creator.py` |
-| Text Processing | ✅ Complete | `pdf_generator/pdf_creator.py` |
-| Image Filtering | ✅ Complete | `scraper/base_scraper.py` |
-| Code Block Rendering | ✅ Complete | `pdf_generator/pdf_creator.py` |
-| HTML Extraction | ✅ Complete | `scraper/base_scraper.py` |
-| Testing Suite | ✅ Complete | `tests/test_enhanced_pdf_generation.py` |
-
-## 🎯 Quality Assurance
-
-The enhancements ensure that:
-
-1. **Mathematical symbols, formulas, and expressions** are rendered exactly as they appear on the website
-2. **Special characters, subscripts, superscripts, and HTML entities** render correctly in PDF
-3. **Styling, indentation, tables, code blocks, and line breaks** are maintained as seen in the original page
-4. **No loss of formatting or symbol misplacement** during conversion
-5. **Content is not simplified or altered** unless explicitly required for PDF compatibility
-
-## 🚀 Future Improvements
-
-Potential areas for further enhancement:
-- **MathML Support**: Direct MathML to PDF rendering
-- **Advanced Layout Detection**: Better preservation of complex webpage layouts
-- **Performance Optimization**: Faster processing for batch operations
-- **Accessibility Features**: Enhanced screen reader compatibility
-- **Custom Styling**: User-configurable PDF appearance themes
-
-## 📝 Usage Notes
-
-The enhanced system automatically:
-- Detects and converts mathematical notation
-- Filters out unwanted UI elements from images
-- Preserves competitive programming format patterns
-- Maintains code structure and syntax highlighting
-- Handles platform-specific content appropriately
-
-No additional configuration is required - all enhancements are applied automatically during PDF generation.
+The OJ Problem Editorial Downloader has been successfully transformed into a powerful webpage-to-PDF tool optimized for competitive programming platforms and LLM training. The direct PDF generation with semantic markup makes it ideal for creating training datasets for machine learning models while preserving the original content structure and formatting.

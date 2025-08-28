@@ -138,7 +138,7 @@ class BaseScraper(ABC):
         >>> data = scraper.get_problem_statement("https://example.com/problem/123")
     """
     
-    # Platform patterns for URL detection
+    # Platform patterns for URL detection (enhanced with CodeChef support)
     PLATFORM_PATTERNS = {
         'AtCoder': [
             r'https://atcoder\.jp/contests/[^/]+/tasks/[^/]+',
@@ -150,6 +150,11 @@ class BaseScraper(ABC):
         ],
         'SPOJ': [
             r'https://www\.spoj\.com/problems/[A-Z0-9_]+'
+        ],
+        'CodeChef': [
+            r'https://www\.codechef\.com/problems/[A-Z0-9_]+',
+            r'https://www\.codechef\.com/[A-Z0-9_]+/problems/[A-Z0-9_]+',
+            r'https://discuss\.codechef\.com/.*'
         ]
     }
     
@@ -1240,118 +1245,657 @@ class BaseScraper(ABC):
     
     def _get_pdf_css_styles(self, custom_css: str = None) -> str:
         """
-        Generate CSS styles optimized for PDF rendering.
+        Generate CSS styles optimized for PDF rendering and LLM training.
+        
+        Enhanced for competitive programming platforms with improved text structure,
+        semantic markup, and content organization for better LLM consumption.
         
         Args:
             custom_css (str, optional): Additional custom CSS styles
             
         Returns:
-            str: CSS styles for PDF rendering
+            str: CSS styles for PDF rendering optimized for LLM training
         """
         base_css = """
-        /* PDF Optimization Styles */
+        /* LLM-Optimized PDF Styles for Competitive Programming */
         @page {
             margin: 2cm;
             size: A4;
             @bottom-center {
-                content: counter(page);
+                content: counter(page) " / " counter(pages);
+                font-size: 9pt;
+                color: #666;
+            }
+            @top-right {
+                content: "Generated: " date();
+                font-size: 8pt;
+                color: #888;
             }
         }
         
+        /* Base typography optimized for text extraction */
         body {
-            font-family: 'DejaVu Sans', Arial, sans-serif;
-            font-size: 11pt;
-            line-height: 1.4;
+            font-family: 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif;
+            font-size: 12pt;
+            line-height: 1.6;
             color: #000;
             background: white;
+            margin: 0;
+            padding: 0;
+        }
+        
+        /* Semantic structure for better content identification */
+        .problem-title, h1.problem-title {
+            font-size: 18pt;
+            font-weight: bold;
+            color: #2c3e50;
+            margin: 1.5em 0 1em 0;
+            page-break-after: avoid;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 0.5em;
+        }
+        
+        .problem-statement, .problem-description {
+            background: #f8f9fa;
+            padding: 1em;
+            margin: 1em 0;
+            border-left: 4px solid #007bff;
+            page-break-inside: avoid;
+        }
+        
+        .constraints, .time-limit, .memory-limit {
+            background: #fff3cd;
+            padding: 0.8em;
+            margin: 0.8em 0;
+            border: 1px solid #ffc107;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        
+        .input-format, .output-format {
+            background: #e8f5e8;
+            padding: 0.8em;
+            margin: 0.8em 0;
+            border: 1px solid #28a745;
+            border-radius: 4px;
+        }
+        
+        .sample-input, .sample-output, .example {
+            background: #f8f9fa;
+            padding: 1em;
+            margin: 1em 0;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-family: 'DejaVu Sans Mono', 'Liberation Mono', 'Courier New', monospace;
+            font-size: 10pt;
+            page-break-inside: avoid;
+        }
+        
+        .sample-input::before {
+            content: "[SAMPLE_INPUT]";
+            display: block;
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 0.5em;
+            font-family: 'DejaVu Sans', Arial, sans-serif;
+        }
+        
+        .sample-output::before {
+            content: "[SAMPLE_OUTPUT]";
+            display: block;
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 0.5em;
+            font-family: 'DejaVu Sans', Arial, sans-serif;
         }
         
         /* Remove navigation and non-content elements */
         nav, .navbar, .nav, .navigation, .menu,
         .sidebar, .header, .footer, .banner,
         .advertisement, .ads, .social-media,
-        .breadcrumb, .pagination, .comments {
+        .breadcrumb, .pagination, .comments,
+        .rating, .user-info, .contest-info,
+        .lang-selector, .language-picker,
+        .flag, .country-flag, .submit-button,
+        .login-button, .register-button,
+        .vote, .share-buttons, .social-share,
+        .cookie-banner, .gdpr-notice,
+        .edit-button, .report-button,
+        .tags-container, .difficulty-badge,
+        .problem-tags, .problem-stats,
+        .my-submissions, .contest-navigation,
+        .breadcrumbs, .problem-navigation {
             display: none !important;
         }
         
-        /* Improve readability */
+        /* Enhanced headings with semantic structure */
         h1, h2, h3, h4, h5, h6 {
-            color: #333;
-            margin-top: 1em;
-            margin-bottom: 0.5em;
+            color: #2c3e50;
+            margin-top: 1.5em;
+            margin-bottom: 0.8em;
             page-break-after: avoid;
+            font-weight: bold;
         }
         
+        h1 { font-size: 18pt; border-bottom: 2px solid #3498db; padding-bottom: 0.3em; }
+        h2 { font-size: 16pt; border-bottom: 1px solid #3498db; padding-bottom: 0.2em; }
+        h3 { font-size: 14pt; color: #34495e; }
+        h4 { font-size: 12pt; color: #34495e; }
+        h5 { font-size: 11pt; color: #34495e; }
+        h6 { font-size: 10pt; color: #34495e; }
+        
+        /* Improved paragraph formatting */
         p {
-            margin-bottom: 0.8em;
+            margin-bottom: 1em;
             orphans: 3;
             widows: 3;
+            text-align: justify;
         }
         
-        /* Code blocks */
+        /* Enhanced code blocks for competitive programming */
         pre, code {
-            font-family: 'DejaVu Sans Mono', 'Courier New', monospace;
-            font-size: 9pt;
-            background: #f5f5f5;
-            border: 1px solid #ddd;
-            padding: 0.5em;
+            font-family: 'DejaVu Sans Mono', 'Liberation Mono', 'Source Code Pro', 'Courier New', monospace;
+            font-size: 10pt;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            padding: 1em;
+            margin: 1em 0;
             page-break-inside: avoid;
+            border-radius: 4px;
+            overflow-wrap: break-word;
+            white-space: pre-wrap;
         }
         
-        /* Tables */
-        table {
-            border-collapse: collapse;
-            width: 100%;
+        pre::before {
+            content: "[CODE_BLOCK]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.5em;
+            font-family: 'DejaVu Sans', Arial, sans-serif;
+        }
+        
+        .code-block, .highlight {
+            background: #272822;
+            color: #f8f8f2;
+            padding: 1em;
+            border-radius: 6px;
             margin: 1em 0;
             page-break-inside: avoid;
         }
         
+        .code-block::before,
+        .highlight::before {
+            content: "[CODE_BLOCK]";
+            display: block;
+            font-size: 8pt;
+            color: #aaa;
+            font-weight: normal;
+            margin-bottom: 0.5em;
+            font-family: 'DejaVu Sans', Arial, sans-serif;
+        }
+        
+        /* Inline code styling */
+        code {
+            background: #f1f3f4;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-size: 0.9em;
+            border: none;
+            margin: 0;
+        }
+        
+        code::before {
+            content: "[INLINE_CODE]";
+            font-size: 0.7em;
+            color: #666;
+            margin-right: 0.3em;
+        }
+        
+        /* Enhanced tables for problem data */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1.5em 0;
+            page-break-inside: avoid;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        table::before {
+            content: "[TABLE]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.5em;
+        }
+        
         th, td {
-            border: 1px solid #ddd;
-            padding: 0.5em;
+            border: 1px solid #dee2e6;
+            padding: 0.8em;
             text-align: left;
+            vertical-align: top;
         }
         
         th {
-            background: #f0f0f0;
+            background: #f8f9fa;
             font-weight: bold;
+            color: #495057;
         }
         
-        /* Images */
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+        
+        /* Images and figures */
         img {
             max-width: 100%;
             height: auto;
             page-break-inside: avoid;
+            display: block;
+            margin: 1em auto;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
         }
         
-        /* Mathematical expressions */
-        .math, .tex, .mathjax {
-            font-family: 'Latin Modern Math', 'STIX Two Math', serif;
+        img::before {
+            content: "[IMAGE: " attr(alt) "]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.3em;
         }
         
-        /* Prevent page breaks in problematic areas */
-        .problem-statement, .editorial-content,
-        .sample-test, .constraint {
+        figure {
+            margin: 1.5em 0;
+            text-align: center;
             page-break-inside: avoid;
         }
         
-        /* Platform-specific improvements */
-        .problem-statement .title {
-            color: #2c3e50;
-            font-size: 1.5em;
-            margin-bottom: 1em;
+        figcaption {
+            font-style: italic;
+            color: #6c757d;
+            margin-top: 0.5em;
+            font-size: 0.9em;
         }
         
-        .time-limit, .memory-limit {
+        figcaption::before {
+            content: "[CAPTION] ";
+            font-weight: bold;
+        }
+        
+        /* Mathematical expressions */
+        .math, .tex, .mathjax, .katex {
+            font-family: 'Latin Modern Math', 'STIX Two Math', 'Cambria Math', serif;
+            font-size: 1.1em;
+            margin: 0.5em 0;
+        }
+        
+        .math::before,
+        .tex::before,
+        .mathjax::before,
+        .katex::before {
+            content: "[MATH]";
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-right: 0.3em;
+        }
+        
+        /* Lists with better spacing */
+        ul, ol {
+            margin: 1em 0;
+            padding-left: 2em;
+        }
+        
+        ul::before {
+            content: "[LIST]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.3em;
+        }
+        
+        ol::before {
+            content: "[NUMBERED_LIST]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.3em;
+        }
+        
+        li {
+            margin-bottom: 0.5em;
+        }
+        
+        /* Special elements for competitive programming */
+        .verdict, .status {
+            padding: 0.3em 0.6em;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        .verdict.accepted {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .verdict.wrong {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        /* Platform-specific optimizations */
+        
+        /* Codeforces specific */
+        .problem-statement .problem-statement {
+            padding: 0;
+            background: none;
+            border: none;
+        }
+        
+        .input-specification, .output-specification {
+            background: #e8f5e8;
+            padding: 0.8em;
+            margin: 0.8em 0;
+            border: 1px solid #28a745;
+            border-radius: 4px;
+        }
+        
+        .input-specification::before {
+            content: "[INPUT_SPECIFICATION]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        .output-specification::before {
+            content: "[OUTPUT_SPECIFICATION]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        /* AtCoder specific */
+        .lang, .lang-en, .lang-ja {
+            display: block !important;
+        }
+        
+        .part {
+            margin: 1em 0;
+            padding: 0.8em;
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+        }
+        
+        .part::before {
+            content: "[SECTION]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        /* CodeChef specific */
+        .problem-statement-string {
+            background: #f8f9fa;
+            padding: 1em;
+            margin: 1em 0;
+            border-left: 4px solid #007bff;
+        }
+        
+        .problem-statement-string::before {
+            content: "[PROBLEM_DESCRIPTION]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        .problem-author {
+            color: #6c757d;
             font-style: italic;
+            margin: 0.5em 0;
+        }
+        
+        .problem-author::before {
+            content: "[AUTHOR]";
+            display: inline;
+            font-size: 8pt;
+            color: #666;
+            margin-right: 0.3em;
+        }
+        
+        /* SPOJ specific */
+        .prob {
+            background: #f8f9fa;
+            padding: 1em;
+            margin: 1em 0;
+            border-left: 4px solid #007bff;
+        }
+        
+        .prob::before {
+            content: "[PROBLEM_CONTENT]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        /* Utility classes for content structure */
+        .content-section {
+            margin: 1.5em 0;
+            page-break-inside: avoid;
+        }
+        
+        .content-section:first-child {
+            margin-top: 0;
+        }
+        
+        .content-section:last-child {
+            margin-bottom: 0;
+        }
+        
+        /* Print optimization */
+        @media print {
+            body {
+                font-size: 11pt;
+                line-height: 1.4;
+            }
+            
+            h1 { font-size: 16pt; }
+            h2 { font-size: 14pt; }
+            h3 { font-size: 12pt; }
+            
+            .problem-statement, .constraints,
+            .input-format, .output-format,
+            .sample-input, .sample-output {
+                page-break-inside: avoid;
+            }
+        }
+        
+        /* Accessibility and readability improvements */
+        strong, b {
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        em, i {
+            font-style: italic;
+            color: #34495e;
+        }
+        
+        /* Links (for reference) */
+        a {
+            color: #007bff;
+            text-decoration: underline;
+        }
+        
+        a::after {
+            content: " (" attr(href) ")";
+            font-size: 0.8em;
+            color: #6c757d;
+        }
+        
+        /* Enhanced problem components for LLM training */
+        .time-limit::before {
+            content: "[TIME_LIMIT] ";
+            font-weight: bold;
+        }
+        
+        .memory-limit::before {
+            content: "[MEMORY_LIMIT] ";
+            font-weight: bold;
+        }
+        
+        .note::before {
+            content: "[NOTE] ";
+            font-weight: bold;
+        }
+        
+        .hint::before {
+            content: "[HINT] ";
+            font-weight: bold;
+        }
+        
+        .source::before {
+            content: "[SOURCE] ";
+            font-weight: bold;
+        }
+        
+        .tags::before {
+            content: "[TAGS] ";
+            font-weight: bold;
+        }
+        
+        .difficulty::before {
+            content: "[DIFFICULTY] ";
+            font-weight: bold;
+        }
+        
+        .example::before {
+            content: "[EXAMPLE] ";
+            font-weight: bold;
+        }
+        
+        /* Better formatting for competitive programming elements */
+        .test-case {
+            border: 1px dashed #999;
+            margin: 0.5em 0;
+            padding: 0.5em;
+        }
+        
+        .test-case::before {
+            content: "[TEST_CASE] ";
+            font-weight: bold;
+            color: #555;
+        }
+        
+        /* Enhanced mathematical notation for LLM parsing */
+        .equation::before {
+            content: "[EQUATION] ";
+            font-style: italic;
+        }
+        
+        .formula::before {
+            content: "[FORMULA] ";
+        }
+        
+        /* Better identification of problem components */
+        .problem-id::before {
+            content: "[PROBLEM_ID] ";
+            font-weight: bold;
+        }
+        
+        .contest-name::before {
+            content: "[CONTEST_NAME] ";
+        }
+        
+        .submission-count::before {
+            content: "[SUBMISSIONS] ";
+        }
+        
+        .success-rate::before {
+            content: "[SUCCESS_RATE] ";
+        }
+        
+        /* Additional LLM optimization markers */
+        .problem-title::before {
+            content: "[PROBLEM_TITLE] ";
+            font-weight: bold;
+        }
+        
+        .constraints::before {
+            content: "[CONSTRAINTS] ";
+            font-weight: bold;
+        }
+        
+        .input-format::before {
+            content: "[INPUT_FORMAT] ";
+            font-weight: bold;
+        }
+        
+        .output-format::before {
+            content: "[OUTPUT_FORMAT] ";
+            font-weight: bold;
+        }
+        
+        /* Better handling of mathematical content */
+        .math-container {
+            background: #f9f9f9;
+            padding: 0.5em;
+            border-left: 3px solid #007bff;
+            margin: 0.5em 0;
+        }
+        
+        .math-container::before {
+            content: "[MATHEMATICAL_CONTENT] ";
+            font-size: 0.8em;
             color: #666;
         }
         
-        /* Remove language selectors and other UI elements */
-        .lang-selector, .language-picker,
-        .flag, .country-flag, .user-info,
-        .rating, .contest-info {
-            display: none !important;
+        /* Better handling of algorithmic content */
+        .algorithm {
+            background: #e8f4f8;
+            padding: 1em;
+            border: 1px solid #17a2b8;
+            border-radius: 4px;
+            margin: 1em 0;
+        }
+        
+        .algorithm::before {
+            content: "[ALGORITHM] ";
+            display: block;
+            font-weight: bold;
+            color: #17a2b8;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Better handling of complexity analysis */
+        .complexity {
+            background: #fff3cd;
+            padding: 0.8em;
+            border: 1px solid #ffc107;
+            border-radius: 4px;
+            margin: 0.8em 0;
+        }
+        
+        .complexity::before {
+            content: "[COMPLEXITY_ANALYSIS] ";
+            display: block;
+            font-weight: bold;
+            color: #856404;
+            margin-bottom: 0.3em;
         }
         """
         

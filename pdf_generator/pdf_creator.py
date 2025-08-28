@@ -579,12 +579,13 @@ class PDFCreator:
             raise PDFGenerationError(f"HTML to PDF conversion failed: {str(e)}", original_exception=e)
     
     def create_webpage_pdf(self, url: str, output_filename: str = None, 
-                          use_selenium: bool = False, custom_css: str = None) -> str:
+                          use_selenium: bool = False, custom_css: str = None,
+                          llm_optimized: bool = True) -> str:
         """
-        Create a PDF directly from a webpage URL.
+        Create a PDF directly from a webpage URL with enhanced LLM optimization.
         
         This method fetches the webpage and converts it to PDF using WeasyPrint,
-        preserving the original layout and styling.
+        preserving the original layout and styling while optimizing for LLM training.
         
         Args:
             url (str): URL of the webpage to convert
@@ -592,6 +593,7 @@ class PDFCreator:
                                            If None, generates from URL
             use_selenium (bool): Whether to use Selenium for JavaScript rendering
             custom_css (str, optional): Additional CSS styles for PDF optimization
+            llm_optimized (bool): Whether to apply LLM training optimizations
             
         Returns:
             str: Path to the generated PDF file
@@ -601,22 +603,28 @@ class PDFCreator:
             NetworkError: If webpage cannot be fetched
         """
         try:
-            # Import scraper functionality
+            # Import scraper functionality with CodeChef support
             from scraper.codeforces_scraper import CodeforcesScraper
             from scraper.atcoder_scraper import AtCoderScraper
             from scraper.spoj_scraper import SPOJScraper
+            from scraper.codechef_scraper import CodeChefScraper
             
-            # Determine which scraper to use based on URL
+            # Determine which scraper to use based on URL with enhanced platform detection
             scraper = None
-            if 'codeforces.com' in url.lower():
+            url_lower = url.lower()
+            
+            if 'codeforces.com' in url_lower:
                 scraper = CodeforcesScraper()
-            elif 'atcoder.jp' in url.lower():
+            elif 'atcoder.jp' in url_lower:
                 scraper = AtCoderScraper()
-            elif 'spoj.com' in url.lower():
+            elif 'spoj.com' in url_lower:
                 scraper = SPOJScraper()
+            elif 'codechef.com' in url_lower:
+                scraper = CodeChefScraper()
             else:
                 # Use Codeforces scraper as default (it has the most robust PDF download)
                 scraper = CodeforcesScraper()
+                logger.info(f"Unknown platform for {url}, using Codeforces scraper as fallback")
             
             # Generate output filename if not provided
             if output_filename is None:
@@ -635,17 +643,24 @@ class PDFCreator:
             
             output_path = self.output_dir / output_filename
             
+            # Apply LLM optimization CSS if requested
+            enhanced_css = custom_css or ""
+            if llm_optimized:
+                llm_css = self._get_llm_optimization_css()
+                enhanced_css = f"{llm_css}\n{enhanced_css}" if enhanced_css else llm_css
+            
             # Use the base scraper's webpage-to-PDF functionality
             success = scraper.download_webpage_as_pdf(
                 url=url,
                 output_path=str(output_path),
                 use_selenium=use_selenium,
-                css_styles=custom_css
+                css_styles=enhanced_css
             )
             
             if not success:
                 raise PDFGenerationError(f"Failed to generate PDF from webpage: {url}")
             
+            logger.info(f"Successfully created {'LLM-optimized ' if llm_optimized else ''}PDF: {output_path}")
             return str(output_path)
             
         except Exception as e:
@@ -653,6 +668,461 @@ class PDFCreator:
                 raise
             logger.error(f"Error creating webpage PDF from {url}: {e}")
             raise PDFGenerationError(f"Webpage PDF creation failed: {str(e)}", original_exception=e)
+
+    def _get_llm_optimization_css(self) -> str:
+        """
+        Generate CSS specifically optimized for LLM training data.
+        
+        This CSS enhances text structure, improves semantic markup,
+        and ensures better content organization for machine learning models.
+        
+        Returns:
+            str: LLM-optimized CSS styles
+        """
+        return """
+        /* LLM Training Optimization CSS */
+        
+        /* Enhanced content structure identification */
+        .problem-title::before,
+        h1.problem-title::before {
+            content: "[PROBLEM_TITLE]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.2em;
+        }
+        
+        .problem-statement::before,
+        .problem-description::before {
+            content: "[PROBLEM_STATEMENT]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.3em;
+        }
+        
+        .constraints::before {
+            content: "[CONSTRAINTS]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.3em;
+        }
+        
+        .input-format::before {
+            content: "[INPUT_FORMAT]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.3em;
+        }
+        
+        .output-format::before {
+            content: "[OUTPUT_FORMAT]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.3em;
+        }
+        
+        .sample-input::before {
+            content: "[SAMPLE_INPUT]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.3em;
+        }
+        
+        .sample-output::before {
+            content: "[SAMPLE_OUTPUT]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.3em;
+        }
+        
+        /* Enhanced text formatting for better extraction */
+        .time-limit::before {
+            content: "Time Limit: ";
+            font-weight: bold;
+        }
+        
+        .memory-limit::before {
+            content: "Memory Limit: ";
+            font-weight: bold;
+        }
+        
+        /* Improved code block identification */
+        pre::before,
+        .code-block::before {
+            content: "[CODE_BLOCK]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.2em;
+            font-family: 'DejaVu Sans', Arial, sans-serif;
+        }
+        
+        /* Mathematical expression identification */
+        .math::before,
+        .tex::before,
+        .mathjax::before,
+        .katex::before {
+            content: "[MATH]";
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-right: 0.3em;
+        }
+        
+        /* Table structure enhancement */
+        table::before {
+            content: "[TABLE]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.2em;
+        }
+        
+        /* Enhanced list structure */
+        ul::before {
+            content: "[LIST]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.2em;
+        }
+        
+        ol::before {
+            content: "[NUMBERED_LIST]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.2em;
+        }
+        
+        /* Image content identification */
+        img::before {
+            content: "[IMAGE: " attr(alt) "]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            font-weight: normal;
+            margin-bottom: 0.2em;
+        }
+        
+        /* Section breaks for better parsing */
+        .content-section::after {
+            content: "";
+            display: block;
+            height: 1px;
+            background: #e0e0e0;
+            margin: 1em 0;
+        }
+        
+        /* Enhanced text readability */
+        p {
+            text-indent: 0;
+            margin-bottom: 1.2em;
+            line-height: 1.7;
+        }
+        
+        /* Better spacing for content blocks */
+        .problem-statement,
+        .constraints,
+        .input-format,
+        .output-format,
+        .sample-input,
+        .sample-output {
+            margin: 1.5em 0;
+            padding: 1.2em;
+            border: 1px solid #d0d0d0;
+            border-radius: 6px;
+            page-break-inside: avoid;
+        }
+        
+        /* Improved heading hierarchy */
+        h1::after { content: " [H1]"; font-size: 8pt; color: #999; }
+        h2::after { content: " [H2]"; font-size: 8pt; color: #999; }
+        h3::after { content: " [H3]"; font-size: 8pt; color: #999; }
+        h4::after { content: " [H4]"; font-size: 8pt; color: #999; }
+        h5::after { content: " [H5]"; font-size: 8pt; color: #999; }
+        h6::after { content: " [H6]"; font-size: 8pt; color: #999; }
+        
+        /* Enhanced emphasis */
+        strong,
+        b {
+            background: rgba(255, 255, 0, 0.1);
+            padding: 0.1em;
+        }
+        
+        /* Platform-specific LLM optimizations */
+        
+        /* Codeforces */
+        .input-specification::before {
+            content: "[INPUT_SPECIFICATION]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        .output-specification::before {
+            content: "[OUTPUT_SPECIFICATION]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        /* AtCoder */
+        .part::before {
+            content: "[SECTION]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        /* CodeChef */
+        .problem-statement-string::before {
+            content: "[PROBLEM_DESCRIPTION]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        .problem-author::before {
+            content: "[AUTHOR]";
+            display: inline;
+            font-size: 8pt;
+            color: #666;
+            margin-right: 0.3em;
+        }
+        
+        /* SPOJ */
+        .prob::before {
+            content: "[PROBLEM_CONTENT]";
+            display: block;
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        /* Better code formatting for LLM parsing */
+        pre,
+        code {
+            background: #f8f8f8;
+            border: 2px solid #e0e0e0;
+            padding: 1em;
+            margin: 1em 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'Source Code Pro', 'DejaVu Sans Mono', 'Courier New', monospace;
+            line-height: 1.5;
+        }
+        
+        /* Enhanced table readability */
+        table {
+            margin: 2em 0;
+            border: 2px solid #333;
+        }
+        
+        th {
+            background: #f0f0f0;
+            font-weight: bold;
+            text-align: center;
+            padding: 0.8em;
+        }
+        
+        td {
+            padding: 0.8em;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        /* Better list formatting */
+        li {
+            margin-bottom: 0.8em;
+            padding-left: 0.5em;
+        }
+        
+        /* Remove unnecessary UI elements that might confuse LLMs */
+        .btn, .button, .submit,
+        .login, .register, .signup,
+        .social, .share, .like,
+        .comment-form, .reply-form,
+        .advertisement, .ads,
+        .popup, .modal, .overlay,
+        .cookie-notice, .gdpr,
+        .chat, .help, .support,
+        .vote, .rating, .user-info,
+        .contest-info, .navigation,
+        .header, .footer, .sidebar,
+        .breadcrumb, .pagination,
+        .problem-tags, .problem-stats,
+        .my-submissions, .contest-navigation,
+        .breadcrumbs, .problem-navigation {
+            display: none !important;
+        }
+        
+        /* Enhanced problem component identification for LLM training */
+        .time-limit::before { content: "[TIME_LIMIT] "; }
+        .memory-limit::before { content: "[MEMORY_LIMIT] "; }
+        .example::before { content: "[EXAMPLE] "; }
+        .note::before { content: "[NOTE] "; }
+        .hint::before { content: "[HINT] "; }
+        .source::before { content: "[SOURCE] "; }
+        .tags::before { content: "[TAGS] "; }
+        .difficulty::before { content: "[DIFFICULTY] "; }
+        .author::before { content: "[AUTHOR] "; }
+        .editorial::before { content: "[EDITORIAL] "; }
+        
+        /* Better formatting for competitive programming elements */
+        .test-case {
+            border: 1px dashed #999;
+            margin: 0.5em 0;
+            padding: 0.5em;
+        }
+        
+        .test-case::before {
+            content: "[TEST_CASE] ";
+            font-weight: bold;
+            color: #555;
+        }
+        
+        /* Enhanced mathematical notation for LLM parsing */
+        .equation::before {
+            content: "[EQUATION] ";
+            font-style: italic;
+        }
+        
+        .formula::before {
+            content: "[FORMULA] ";
+        }
+        
+        /* Better identification of problem components */
+        .problem-id::before {
+            content: "[PROBLEM_ID] ";
+            font-weight: bold;
+        }
+        
+        .contest-name::before {
+            content: "[CONTEST_NAME] ";
+        }
+        
+        .submission-count::before {
+            content: "[SUBMISSIONS] ";
+        }
+        
+        .success-rate::before {
+            content: "[SUCCESS_RATE] ";
+        }
+        
+        /* Additional LLM optimization markers */
+        .problem-title::before {
+            content: "[PROBLEM_TITLE] ";
+            font-weight: bold;
+        }
+        
+        .constraints::before {
+            content: "[CONSTRAINTS] ";
+            font-weight: bold;
+        }
+        
+        .input-format::before {
+            content: "[INPUT_FORMAT] ";
+            font-weight: bold;
+        }
+        
+        .output-format::before {
+            content: "[OUTPUT_FORMAT] ";
+            font-weight: bold;
+        }
+        
+        /* Better handling of mathematical content */
+        .math-container {
+            background: #f9f9f9;
+            padding: 0.5em;
+            border-left: 3px solid #007bff;
+            margin: 0.5em 0;
+        }
+        
+        .math-container::before {
+            content: "[MATHEMATICAL_CONTENT] ";
+            font-size: 0.8em;
+            color: #666;
+        }
+        
+        /* Better handling of algorithmic content */
+        .algorithm {
+            background: #e8f4f8;
+            padding: 1em;
+            border: 1px solid #17a2b8;
+            border-radius: 4px;
+            margin: 1em 0;
+        }
+        
+        .algorithm::before {
+            content: "[ALGORITHM] ";
+            display: block;
+            font-weight: bold;
+            color: #17a2b8;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Better handling of complexity analysis */
+        .complexity {
+            background: #fff3cd;
+            padding: 0.8em;
+            border: 1px solid #ffc107;
+            border-radius: 4px;
+            margin: 0.8em 0;
+        }
+        
+        .complexity::before {
+            content: "[COMPLEXITY_ANALYSIS] ";
+            display: block;
+            font-weight: bold;
+            color: #856404;
+            margin-bottom: 0.3em;
+        }
+        
+        /* Enhanced editorial content markers */
+        .editorial-content::before {
+            content: "[EDITORIAL_CONTENT] ";
+            display: block;
+            font-weight: bold;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        .solution::before {
+            content: "[SOLUTION] ";
+            font-weight: bold;
+        }
+        
+        .explanation::before {
+            content: "[EXPLANATION] ";
+            font-weight: bold;
+        }
+        
+        .implementation::before {
+            content: "[IMPLEMENTATION] ";
+            font-weight: bold;
+        }
+        """
 
     def _convert_latex_symbols(self, text: str) -> str:
         """Convert LaTeX mathematical symbols to Unicode equivalents with enhanced coverage.

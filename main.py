@@ -44,6 +44,7 @@ from utils.file_manager import FileManager
 from scraper.atcoder_scraper import AtCoderScraper
 from scraper.codeforces_scraper import CodeforcesScraper
 from scraper.spoj_scraper import SPOJScraper
+from scraper.codechef_scraper import CodeChefScraper
 from pdf_generator.pdf_creator import PDFCreator
 
 # Import comprehensive error handling
@@ -265,7 +266,8 @@ class ApplicationManager:
             self.scrapers = {
                 "AtCoder": AtCoderScraper(headless=headless, timeout=timeout),
                 "Codeforces": CodeforcesScraper(headless=headless, timeout=timeout),
-                "SPOJ": SPOJScraper(headless=headless, timeout=timeout)
+                "SPOJ": SPOJScraper(headless=headless, timeout=timeout),
+                "CodeChef": CodeChefScraper(headless=headless, timeout=timeout)
             }
             
             logging.info("All components initialized successfully")
@@ -377,14 +379,16 @@ class ApplicationManager:
             logging.error(f"Error during GUI cleanup: {e}")
     
     @handle_exception
-    def run_batch_processing(self, urls: List[str], output_dir: Optional[str] = None, direct_pdf: bool = False):
+    def run_batch_processing(self, urls: List[str], output_dir: Optional[str] = None, 
+                           direct_pdf: bool = True, llm_optimized: bool = True):
         """
         Run batch processing for multiple URLs with comprehensive error handling.
         
         Args:
             urls: List of URLs to process
             output_dir: Output directory (optional)
-            direct_pdf: Whether to use direct webpage-to-PDF conversion
+            direct_pdf: Whether to use direct webpage-to-PDF conversion (default: True)
+            llm_optimized: Whether to apply LLM training optimizations (default: True)
             
         Returns:
             Tuple[int, int]: (successful_count, failed_count)
@@ -410,7 +414,7 @@ class ApplicationManager:
             except Exception as e:
                 raise FileSystemError(f"Cannot access output directory: {output_dir}", output_dir, e)
             
-            logging.info(f"Starting batch processing for {len(urls)} URLs")
+            logging.info(f"Starting batch processing for {len(urls)} URLs ({'direct PDF' if direct_pdf else 'traditional'} mode{',' if direct_pdf else ''}{'LLM-optimized' if direct_pdf and llm_optimized else ''})")
             
             successful = 0
             failed = 0
@@ -420,7 +424,7 @@ class ApplicationManager:
                 
                 for url in urls:
                     try:
-                        future = executor.submit(self._process_single_url, url, output_dir, direct_pdf)
+                        future = executor.submit(self._process_single_url, url, output_dir, direct_pdf, llm_optimized)
                         futures.append((url, future))
                     except Exception as e:
                         logging.error(f"Failed to submit URL for processing: {url}: {e}")
@@ -454,14 +458,15 @@ class ApplicationManager:
             self._handle_error(e, "batch_processing")
             return 0, len(urls)
     
-    def _process_single_url(self, url: str, output_dir: str, direct_pdf: bool = False) -> bool:
+    def _process_single_url(self, url: str, output_dir: str, direct_pdf: bool = True, llm_optimized: bool = True) -> bool:
         """
-        Process a single URL for batch processing.
+        Process a single URL for batch processing with enhanced direct PDF support.
         
         Args:
             url: URL to process
             output_dir: Output directory
-            direct_pdf: Whether to use direct webpage-to-PDF conversion
+            direct_pdf: Whether to use direct webpage-to-PDF conversion (default: True)
+            llm_optimized: Whether to apply LLM training optimizations (default: True)
             
         Returns:
             bool: True if successful, False otherwise
@@ -489,8 +494,8 @@ class ApplicationManager:
             Path(output_dir).mkdir(parents=True, exist_ok=True)
             
             if direct_pdf:
-                # Use direct webpage-to-PDF conversion
-                logging.info(f"Using direct PDF conversion for: {url}")
+                # Use direct webpage-to-PDF conversion with LLM optimization
+                logging.info(f"Using direct PDF conversion {'(LLM-optimized) ' if llm_optimized else ''}for: {url}")
                 
                 # Generate filename based on URL
                 from urllib.parse import urlparse
@@ -505,28 +510,30 @@ class ApplicationManager:
                 
                 output_path = Path(output_dir) / filename
                 
-                # Use the scraper's direct PDF download method
-                if hasattr(scraper, 'download_problem_as_pdf'):
-                    success = scraper.download_problem_as_pdf(
+                # Use enhanced create_webpage_pdf method
+                try:
+                    self.pdf_creator.output_dir = Path(output_dir)
+                    pdf_path = self.pdf_creator.create_webpage_pdf(
                         url=url,
-                        output_path=str(output_path),
-                        use_selenium=False  # Can be made configurable
+                        output_filename=filename,
+                        use_selenium=False,  # Can be made configurable
+                        llm_optimized=llm_optimized
                     )
-                else:
-                    # Fallback to generic webpage download
-                    success = scraper.download_webpage_as_pdf(
-                        url=url,
-                        output_path=str(output_path)
-                    )
-                
-                if success:
-                    logging.info(f"Direct PDF created: {output_path}")
-                    return True
-                else:
-                    logging.error(f"Failed to create direct PDF for: {url}")
-                    return False
+                    
+                    if pdf_path and Path(pdf_path).exists():
+                        logging.info(f"Direct PDF created: {pdf_path}")
+                        return True
+                    else:
+                        logging.error(f"Failed to create direct PDF for: {url}")
+                        return False
+                        
+                except Exception as e:
+                    logging.error(f"Direct PDF generation failed for {url}: {e}")
+                    # Fall back to traditional mode
+                    logging.info(f"Falling back to traditional mode for: {url}")
+                    direct_pdf = False
             
-            else:
+            if not direct_pdf:
                 # Use traditional scraping + PDF generation
                 logging.info(f"Using traditional scraping for: {url}")
                 
@@ -797,7 +804,27 @@ Examples:
     parser.add_argument(
         '--direct-pdf',
         action='store_true',
-        help='Download webpages directly as PDF (preserves original layout)'
+        default=True,  # Make direct PDF the default mode
+        help='Download webpages directly as PDF (preserves original layout) - DEFAULT MODE'
+    )
+    
+    parser.add_argument(
+        '--traditional-mode',
+        action='store_true',
+        help='Use traditional scraping mode instead of direct PDF generation'
+    )
+    
+    parser.add_argument(
+        '--llm-optimized',
+        action='store_true',
+        default=True,  # Enable LLM optimization by default
+        help='Apply LLM training optimizations to PDF output - DEFAULT'
+    )
+    
+    parser.add_argument(
+        '--no-llm-optimization',
+        action='store_true',
+        help='Disable LLM training optimizations'
     )
     
     parser.add_argument(
@@ -835,6 +862,16 @@ def main():
         # Initialize the application
         app_manager.initialize()
         
+        # Process CLI arguments for modes
+        direct_pdf_mode = args.direct_pdf and not args.traditional_mode
+        llm_optimized = args.llm_optimized and not args.no_llm_optimization
+        
+        # Log the mode being used
+        mode_description = "traditional scraping" if not direct_pdf_mode else "direct PDF"
+        if direct_pdf_mode and llm_optimized:
+            mode_description += " (LLM-optimized)"
+        logging.info(f"Using {mode_description} mode")
+        
         # Determine run mode
         if args.batch:
             # Batch processing mode
@@ -853,7 +890,7 @@ def main():
                 
                 logging.info(f"Processing {len(urls)} URLs from batch file")
                 successful, failed = app_manager.run_batch_processing(
-                    urls, args.output, direct_pdf=args.direct_pdf
+                    urls, args.output, direct_pdf=direct_pdf_mode, llm_optimized=llm_optimized
                 )
                 
                 if failed > 0:
@@ -870,7 +907,7 @@ def main():
             # Single URL processing mode
             logging.info(f"Processing single URL: {args.url}")
             successful, failed = app_manager.run_batch_processing(
-                [args.url], args.output, direct_pdf=args.direct_pdf
+                [args.url], args.output, direct_pdf=direct_pdf_mode, llm_optimized=llm_optimized
             )
             
             if failed > 0:

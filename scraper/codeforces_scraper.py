@@ -291,7 +291,7 @@ class CodeforcesScraper(BaseScraper):
             contest_id, problem_letter = match.groups()
             title = f"Codeforces Contest {contest_id} Problem {problem_letter}"
         
-        # Codeforces-specific CSS for better PDF rendering
+        # Codeforces-specific CSS for better PDF rendering with LLM optimization
         codeforces_css = """
         /* Codeforces-specific PDF optimizations */
         .lang-chooser, .lang-dropdown,
@@ -302,7 +302,15 @@ class CodeforcesScraper(BaseScraper):
         .social, .sharing,
         .contest-nav, .contest-header,
         .datatable .top, .datatable .bottom,
-        .pagination, .page-index {
+        .pagination, .page-index,
+        .vote, .comment-table, #comments,
+        .social-share, .share-buttons,
+        .user-info, .user-box,
+        .rating, .user-rating,
+        .contest-rating, .contribution,
+        .login-reminder, .register-link,
+        .advertisement, .ads-container,
+        .cookie-notice, .gdpr-banner {
             display: none !important;
         }
         
@@ -319,11 +327,28 @@ class CodeforcesScraper(BaseScraper):
             color: #2c3e50;
         }
         
+        .problem-statement .title::before {
+            content: "[PROBLEM_TITLE] ";
+            font-size: 0.7em;
+            color: #666;
+            margin-right: 0.5em;
+        }
+        
         .time-limit, .memory-limit,
         .input-file, .output-file {
             font-style: italic;
             color: #666;
             margin: 0.2em 0;
+        }
+        
+        .time-limit::before {
+            content: "[TIME_LIMIT] ";
+            font-weight: bold;
+        }
+        
+        .memory-limit::before {
+            content: "[MEMORY_LIMIT] ";
+            font-weight: bold;
         }
         
         .section-title {
@@ -348,6 +373,14 @@ class CodeforcesScraper(BaseScraper):
             margin-bottom: 0.3em;
         }
         
+        .input .title::before {
+            content: "[INPUT] ";
+        }
+        
+        .output .title::before {
+            content: "[OUTPUT] ";
+        }
+        
         pre {
             background: #f8f9fa;
             border: 1px solid #dee2e6;
@@ -360,16 +393,78 @@ class CodeforcesScraper(BaseScraper):
             white-space: pre-wrap;
         }
         
+        pre::before {
+            content: "[CODE_BLOCK]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
         /* Math rendering improvements */
         .MathJax, .math, .tex {
             font-size: 1em;
         }
         
-        /* Remove ratings and user-specific content */
-        .user-rating, .rating,
-        .contest-rating, .contribution,
-        .user-info, .user-box {
-            display: none !important;
+        .MathJax::before,
+        .math::before,
+        .tex::before {
+            content: "[MATH]";
+            font-size: 0.8em;
+            color: #666;
+            margin-right: 0.3em;
+        }
+        
+        /* Problem statement section */
+        .problem-statement {
+            background: #f9f9f9;
+            padding: 1em;
+            border-left: 4px solid #007bff;
+            margin: 1em 0;
+        }
+        
+        .problem-statement::before {
+            content: "[PROBLEM_STATEMENT]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Input specification */
+        .input-specification::before {
+            content: "[INPUT_SPECIFICATION]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Output specification */
+        .output-specification::before {
+            content: "[OUTPUT_SPECIFICATION]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Note section */
+        .note::before {
+            content: "[NOTE]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Sample tests */
+        .sample-tests::before {
+            content: "[SAMPLE_TESTS]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
         }
         """
         
@@ -404,7 +499,7 @@ class CodeforcesScraper(BaseScraper):
         blog_id = match.group(1)
         title = f"Codeforces Editorial {blog_id}"
         
-        # Codeforces blog-specific CSS
+        # Codeforces blog-specific CSS with LLM optimization
         blog_css = """
         /* Codeforces blog-specific PDF optimizations */
         .lang-chooser, .second-level-menu,
@@ -412,8 +507,14 @@ class CodeforcesScraper(BaseScraper):
         .sidebar, .right-sidebar,
         .social, .sharing, .vote,
         .comment-table, #comments,
-        .blog-entry .info .right,
-        .contribution, .rating {
+        .contribution, .rating,
+        .user-link, .user-avatar,
+        .handle, .user-rating,
+        .login-reminder, .register-link,
+        .advertisement, .ads-container,
+        .cookie-notice, .gdpr-banner,
+        .share-buttons, .social-share,
+        .edit-button, .report-button {
             display: none !important;
         }
         
@@ -427,8 +528,23 @@ class CodeforcesScraper(BaseScraper):
             margin-bottom: 1em;
         }
         
+        .blog-entry .title::before {
+            content: "[EDITORIAL_TITLE] ";
+            font-size: 0.7em;
+            color: #666;
+            margin-right: 0.5em;
+        }
+        
         .blog-entry .content {
             line-height: 1.6;
+        }
+        
+        .blog-entry .content::before {
+            content: "[EDITORIAL_CONTENT]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 1em;
         }
         
         .blog-entry .content h1,
@@ -450,15 +566,59 @@ class CodeforcesScraper(BaseScraper):
             font-size: 9pt;
         }
         
+        .blog-entry .content pre::before {
+            content: "[CODE_BLOCK]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        .blog-entry .content code::before {
+            content: "[INLINE_CODE]";
+            font-size: 0.7em;
+            color: #666;
+            margin-right: 0.3em;
+        }
+        
         /* Mathematical expressions */
         .MathJax, .math, .tex {
             font-family: 'Latin Modern Math', serif;
         }
         
-        /* Remove user avatars and profile info */
-        .user-link, .user-avatar,
-        .handle, .user-rating {
-            display: none !important;
+        .MathJax::before,
+        .math::before,
+        .tex::before {
+            content: "[MATH]";
+            font-size: 0.8em;
+            color: #666;
+            margin-right: 0.3em;
+        }
+        
+        /* Tables in editorials */
+        .blog-entry .content table::before {
+            content: "[TABLE]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        
+        /* Lists in editorials */
+        .blog-entry .content ul::before {
+            content: "[LIST]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.3em;
+        }
+        
+        .blog-entry .content ol::before {
+            content: "[NUMBERED_LIST]";
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 0.3em;
         }
         """
         
