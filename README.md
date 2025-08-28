@@ -12,11 +12,10 @@ A powerful, intelligent webpage-to-PDF converter specifically designed for compe
 ## ✨ Key Features
 
 ### 🚀 **Direct PDF Generation (Default Mode)**
-- **One-click conversion**: Transform any competitive programming webpage to PDF
-- **Original layout preservation**: Maintains visual fidelity and styling  
-- **Lightning fast**: No content scraping overhead
-- **WeasyPrint powered**: High-quality HTML-to-PDF conversion
-- **Intelligent fallback**: Automatic traditional mode when needed
+- **Exact rendering (default)**: Pixel-perfect PDFs via Chrome print-to-PDF
+- **Original layout preserved**: Fonts, colors, spacing, dynamic content
+- **HTML renderer (optional)**: WeasyPrint path with optional LLM optimization
+- **JS support**: Automatic Selenium use where needed
 
 ### 🤖 **LLM Training Optimization**
 - **Semantic markup**: Content sections clearly labeled with `[PROBLEM_TITLE]`, `[CONSTRAINTS]`, etc.
@@ -43,7 +42,7 @@ pip install -r requirements.txt
 
 ### Basic Usage
 ```bash
-# Convert single webpage to PDF (LLM-optimized by default)
+# Convert single webpage to PDF (exact look by default)
 python main.py --url "https://codeforces.com/contest/1234/problem/A" --no-gui
 
 # Batch process multiple URLs
@@ -51,8 +50,11 @@ echo "https://codeforces.com/contest/1234/problem/A" > urls.txt
 echo "https://www.codechef.com/problems/TEST" >> urls.txt
 python main.py --batch urls.txt --output ./pdfs
 
-# Traditional scraping mode (if needed)
-python main.py --url "URL" --traditional-mode
+# Traditional scraping mode (optional, re-formatted PDFs)
+python main.py --url "URL" --traditional-mode --no-gui
+
+# HTML renderer (not exact) with LLM optimization
+python main.py --url "URL" --no-exact --llm-optimized --no-gui
 ```
 
 ### Output Example
@@ -100,8 +102,8 @@ OJ-Problem-Editorial-Downloader/
 
 ### Prerequisites
 
-- **Python 3.8 or higher** ([Download here](https://www.python.org/downloads/))
-- **Google Chrome browser** (for Selenium WebDriver - automatically managed)
+- **Python 3.8 or higher**
+- **Google Chrome** (for exact rendering via Selenium/DevTools)
 
 ### Install Dependencies
 ```bash
@@ -165,9 +167,9 @@ optional arguments:
   --version, -v         show program's version number and exit
 ```
 
-## 🤖 LLM Training Optimization
+## 🤖 LLM Training Optimization (Optional)
 
-The generated PDFs are specially optimized for machine learning training with:
+When using the HTML renderer with `--llm-optimized`, PDFs are optimized for training with:
 
 1. **Semantic Markers**: Content sections are clearly labeled with markers like `[PROBLEM_TITLE]`, `[INPUT_FORMAT]`, etc.
 2. **Structured Format**: Consistent organization across all platforms

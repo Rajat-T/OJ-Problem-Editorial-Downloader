@@ -100,7 +100,7 @@ except ImportError:
 from utils.error_handler import (
     NetworkError, URLValidationError, ContentMissingError, CaptchaDetectedError,
     RateLimitError, ErrorDetector, ErrorContext, retry_on_error, handle_exception,
-    ErrorRecovery, error_reporter
+    ErrorRecovery, error_reporter, PDFGenerationError
 )
 
 # Configure logging
@@ -1903,6 +1903,101 @@ class BaseScraper(ABC):
             base_css += "\n\n/* Custom CSS */\n" + custom_css
         
         return base_css
+
+    @handle_exception
+    def download_webpage_as_pdf_chrome_exact(self, url: str, output_path: str, 
+                                            print_background: bool = True,
+                                            viewport_width_px: int = 1280,
+                                            exact_strict: bool = True) -> bool:
+        """
+        Create a pixel-faithful PDF via Chrome's printToPDF (best WYSIWYG).
+
+        Uses Selenium with Chrome DevTools Protocol to print the live-rendered page
+        to PDF, preserving layout, fonts, colors, and dynamic JS-driven content.
+
+        Args:
+            url: Webpage URL
+            output_path: Target PDF path
+            print_background: Include CSS backgrounds
+            scale: Zoom scale for rendering
+            paper_width_in: Page width (inches)
+            paper_height_in: Page height (inches)
+            margin_*_in: Margins (inches)
+
+        Returns:
+            True on success, False otherwise
+        """
+        if not SELENIUM_AVAILABLE:
+            raise NetworkError("Selenium/Chrome is required for exact PDF rendering")
+
+        try:
+            if not self.driver:
+                self.setup_driver()
+
+            # Emulate device metrics and screen media to mirror on-screen layout
+            try:
+                self.driver.execute_cdp_cmd('Emulation.setDeviceMetricsOverride', {
+                    'width': viewport_width_px,
+                    'height': 1000,
+                    'deviceScaleFactor': 1,
+                    'mobile': False
+                })
+                self.driver.execute_cdp_cmd('Emulation.setEmulatedMedia', {'media': 'screen'})
+            except Exception:
+                pass
+
+            # Navigate to page
+            self.driver.get(url)
+
+            # Wait for network/JS to settle a bit
+            time.sleep(1.0)
+
+            # Compute full scrollable height to print a single long page (true pixel view)
+            try:
+                scroll_height = self.driver.execute_script("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);")
+                if not isinstance(scroll_height, (int, float)) or scroll_height <= 0:
+                    scroll_height = 2000
+            except Exception:
+                scroll_height = 2000
+
+            # Convert CSS px to inches (Chrome uses 96 CSS px per inch)
+            paper_width_in = max(1.0, viewport_width_px / 96.0)
+            paper_height_in = min(200.0, max(1.0, float(scroll_height) / 96.0))
+
+            # Zero margins for exact edge-to-edge capture
+            params = {
+                "landscape": False,
+                "displayHeaderFooter": False,
+                "printBackground": print_background,
+                "scale": 1.0,
+                "paperWidth": paper_width_in,
+                "paperHeight": paper_height_in,
+                "marginTop": 0,
+                "marginBottom": 0,
+                "marginLeft": 0,
+                "marginRight": 0,
+                "pageRanges": '',
+                "preferCSSPageSize": False,
+            }
+
+            result = self.driver.execute_cdp_cmd("Page.printToPDF", params)
+            pdf_data = result.get("data")
+            if not pdf_data:
+                raise PDFGenerationError("Chrome did not return PDF data")
+
+            import base64
+            pdf_bytes = base64.b64decode(pdf_data)
+            out_path = Path(output_path)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, 'wb') as f:
+                f.write(pdf_bytes)
+
+            logger.info(f"Exact Chrome-rendered PDF created: {output_path}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Exact Chrome PDF generation failed for {url}: {e}")
+            raise
     
     @abstractmethod
     def get_problem_statement(self, url: str) -> Dict[str, Any]:

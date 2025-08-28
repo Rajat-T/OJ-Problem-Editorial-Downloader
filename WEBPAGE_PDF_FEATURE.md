@@ -6,19 +6,18 @@ The OJ Problem Editorial Downloader now supports direct webpage-to-PDF conversio
 
 ## Key Differences
 
-### Traditional Mode (Default)
+### Traditional Mode (Optional)
 - Scrapes content from the webpage
 - Extracts text, images, and structured data
 - Reformats everything into a clean PDF layout
 - Works even when the webpage has complex JavaScript or dynamic content
 - Better for text-focused content
 
-### Direct PDF Mode (New)
-- Downloads the webpage exactly as it appears in a browser
-- Preserves original styling, colors, and layout
-- Faster processing (no content extraction needed)
-- Better for webpages with complex visual layouts
-- Uses WeasyPrint for high-quality PDF rendering (with fallback to traditional mode)
+### Direct PDF Mode (Default)
+- Exact rendering via Chrome print-to-PDF (pixel-perfect)
+- Preserves original styling, fonts, and layout
+- Ideal for visually rich or JS-driven pages
+- Optional HTML renderer (WeasyPrint) with `--no-exact`
 
 ## Usage
 
@@ -26,20 +25,14 @@ The OJ Problem Editorial Downloader now supports direct webpage-to-PDF conversio
 
 #### Single URL
 ```bash
-# Traditional mode
+# Direct PDF mode (exact by default)
 python main.py --url "https://codeforces.com/problemset/problem/1/A" --no-gui
-
-# Direct PDF mode
-python main.py --url "https://codeforces.com/problemset/problem/1/A" --direct-pdf --no-gui
 ```
 
 #### Batch Processing
 ```bash
-# Traditional mode
-python main.py --batch urls.txt --output ./pdfs
-
-# Direct PDF mode
-python main.py --batch urls.txt --output ./pdfs --direct-pdf
+# Batch (direct PDF mode with exact rendering)
+python main.py --batch urls.txt --output ./pdfs --no-gui
 ```
 
 ### Programmatic Usage
@@ -90,8 +83,8 @@ pdf_path = pdf_creator.create_webpage_pdf(
 ## Technical Details
 
 ### Dependencies
-- **WeasyPrint**: Primary engine for HTML-to-PDF conversion
-- **Fallback**: When WeasyPrint is unavailable, falls back to traditional scraping + PDF generation
+- **Google Chrome + Selenium**: Exact rendering via DevTools `printToPDF`
+- **WeasyPrint**: Optional HTML-to-PDF when using `--no-exact`
 
 ### CSS Optimizations
 The direct PDF mode applies platform-specific CSS optimizations:
@@ -149,7 +142,7 @@ Traditional mode uses content-based names:
 ## Troubleshooting
 
 ### WeasyPrint Not Available
-If you see "WeasyPrint is not available", the system will automatically fall back to traditional PDF generation. To install WeasyPrint properly:
+Only required when using `--no-exact`. To enable HTML renderer:
 
 1. Install system dependencies (platform-specific)
 2. Install Python package: `pip install weasyprint`

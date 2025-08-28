@@ -380,7 +380,8 @@ class ApplicationManager:
     
     @handle_exception
     def run_batch_processing(self, urls: List[str], output_dir: Optional[str] = None, 
-                           direct_pdf: bool = True, llm_optimized: bool = True):
+                           direct_pdf: bool = True, llm_optimized: bool = False,
+                           exact_render: bool = True):
         """
         Run batch processing for multiple URLs with comprehensive error handling.
         
@@ -424,7 +425,7 @@ class ApplicationManager:
                 
                 for url in urls:
                     try:
-                        future = executor.submit(self._process_single_url, url, output_dir, direct_pdf, llm_optimized)
+                        future = executor.submit(self._process_single_url, url, output_dir, direct_pdf, llm_optimized, exact_render)
                         futures.append((url, future))
                     except Exception as e:
                         logging.error(f"Failed to submit URL for processing: {url}: {e}")
@@ -458,7 +459,7 @@ class ApplicationManager:
             self._handle_error(e, "batch_processing")
             return 0, len(urls)
     
-    def _process_single_url(self, url: str, output_dir: str, direct_pdf: bool = True, llm_optimized: bool = True) -> bool:
+    def _process_single_url(self, url: str, output_dir: str, direct_pdf: bool = True, llm_optimized: bool = False, exact_render: bool = True) -> bool:
         """
         Process a single URL for batch processing with enhanced direct PDF support.
         
@@ -513,25 +514,50 @@ class ApplicationManager:
                 # Use enhanced create_webpage_pdf method
                 try:
                     self.pdf_creator.output_dir = Path(output_dir)
-                    pdf_path = self.pdf_creator.create_webpage_pdf(
-                        url=url,
-                        output_filename=filename,
-                        use_selenium=False,  # Can be made configurable
-                        llm_optimized=llm_optimized
-                    )
-                    
-                    if pdf_path and Path(pdf_path).exists():
-                        logging.info(f"Direct PDF created: {pdf_path}")
-                        return True
+                    if exact_render:
+                        # Chrome print-to-PDF for pixel-perfect output
+                        pdf_path = self.pdf_creator.create_webpage_pdf(
+                            url=url,
+                            output_filename=filename,
+                            use_selenium=True,
+                            llm_optimized=False,
+                            exact_render=True
+                        )
+                        if pdf_path and Path(pdf_path).exists():
+                            logging.info(f"Exact-rendered PDF created: {pdf_path}")
+                            return True
+                        logging.error(f"Failed to create exact-rendered PDF for: {url}")
+                        return False
                     else:
+                        # HTML renderer path; try without and then with Selenium for JS
+                        pdf_path = self.pdf_creator.create_webpage_pdf(
+                            url=url,
+                            output_filename=filename,
+                            use_selenium=False,
+                            llm_optimized=llm_optimized,
+                            exact_render=False
+                        )
+                        if pdf_path and Path(pdf_path).exists():
+                            logging.info(f"Direct PDF created: {pdf_path}")
+                            return True
+                        logging.info("Retrying direct PDF generation with Selenium-enabled HTML fetch...")
+                        pdf_path = self.pdf_creator.create_webpage_pdf(
+                            url=url,
+                            output_filename=filename,
+                            use_selenium=True,
+                            llm_optimized=llm_optimized,
+                            exact_render=False
+                        )
+                        if pdf_path and Path(pdf_path).exists():
+                            logging.info(f"Direct PDF created with Selenium content: {pdf_path}")
+                            return True
                         logging.error(f"Failed to create direct PDF for: {url}")
                         return False
-                        
+
                 except Exception as e:
                     logging.error(f"Direct PDF generation failed for {url}: {e}")
-                    # Fall back to traditional mode
-                    logging.info(f"Falling back to traditional mode for: {url}")
-                    direct_pdf = False
+                    # Do NOT fall back to traditional scraping in direct mode
+                    return False
             
             if not direct_pdf:
                 # Use traditional scraping + PDF generation
@@ -804,8 +830,8 @@ Examples:
     parser.add_argument(
         '--direct-pdf',
         action='store_true',
-        default=True,  # Make direct PDF the default mode
-        help='Download webpages directly as PDF (preserves original layout) - DEFAULT MODE'
+        default=True,  # Direct PDF is default
+        help='Download webpages directly as PDF (exact rendering by default)'
     )
     
     parser.add_argument(
@@ -817,8 +843,23 @@ Examples:
     parser.add_argument(
         '--llm-optimized',
         action='store_true',
-        default=True,  # Enable LLM optimization by default
-        help='Apply LLM training optimizations to PDF output - DEFAULT'
+        default=False,  # Disabled by default for exact look
+        help='Apply LLM training optimizations to PDF output'
+    )
+
+    parser.add_argument(
+        '--exact',
+        dest='exact_render',
+        action='store_true',
+        default=True,  # Exact rendering default
+        help='Use Chrome print-to-PDF for pixel-perfect output (default)'
+    )
+
+    parser.add_argument(
+        '--no-exact',
+        dest='exact_render',
+        action='store_false',
+        help='Disable exact rendering; use HTML renderer with optional LLM CSS'
     )
     
     parser.add_argument(
@@ -865,11 +906,12 @@ def main():
         # Process CLI arguments for modes
         direct_pdf_mode = args.direct_pdf and not args.traditional_mode
         llm_optimized = args.llm_optimized and not args.no_llm_optimization
+        exact_render = getattr(args, 'exact_render', True)
         
         # Log the mode being used
-        mode_description = "traditional scraping" if not direct_pdf_mode else "direct PDF"
-        if direct_pdf_mode and llm_optimized:
-            mode_description += " (LLM-optimized)"
+        mode_description = "traditional scraping" if not direct_pdf_mode else ("direct PDF (exact)" if exact_render else "direct PDF (HTML renderer)")
+        if direct_pdf_mode and not exact_render and llm_optimized:
+            mode_description += " + LLM-optimized"
         logging.info(f"Using {mode_description} mode")
         
         # Determine run mode
@@ -890,7 +932,7 @@ def main():
                 
                 logging.info(f"Processing {len(urls)} URLs from batch file")
                 successful, failed = app_manager.run_batch_processing(
-                    urls, args.output, direct_pdf=direct_pdf_mode, llm_optimized=llm_optimized
+                    urls, args.output, direct_pdf=direct_pdf_mode, llm_optimized=llm_optimized, exact_render=exact_render
                 )
                 
                 if failed > 0:
@@ -907,7 +949,7 @@ def main():
             # Single URL processing mode
             logging.info(f"Processing single URL: {args.url}")
             successful, failed = app_manager.run_batch_processing(
-                [args.url], args.output, direct_pdf=direct_pdf_mode, llm_optimized=llm_optimized
+                [args.url], args.output, direct_pdf=direct_pdf_mode, llm_optimized=llm_optimized, exact_render=exact_render
             )
             
             if failed > 0:

@@ -580,7 +580,7 @@ class PDFCreator:
     
     def create_webpage_pdf(self, url: str, output_filename: str = None, 
                           use_selenium: bool = False, custom_css: str = None,
-                          llm_optimized: bool = True) -> str:
+                          llm_optimized: bool = False, exact_render: bool = True) -> str:
         """
         Create a PDF directly from a webpage URL with enhanced LLM optimization.
         
@@ -608,21 +608,26 @@ class PDFCreator:
             from scraper.atcoder_scraper import AtCoderScraper
             from scraper.spoj_scraper import SPOJScraper
             from scraper.codechef_scraper import CodeChefScraper
-            
+
             # Determine which scraper to use based on URL with enhanced platform detection
             scraper = None
+            platform = "Unknown"
             url_lower = url.lower()
-            
+
             if 'codeforces.com' in url_lower:
                 scraper = CodeforcesScraper()
+                platform = "Codeforces"
             elif 'atcoder.jp' in url_lower:
                 scraper = AtCoderScraper()
+                platform = "AtCoder"
             elif 'spoj.com' in url_lower:
                 scraper = SPOJScraper()
+                platform = "SPOJ"
             elif 'codechef.com' in url_lower:
                 scraper = CodeChefScraper()
+                platform = "CodeChef"
             else:
-                # Use Codeforces scraper as default (it has the most robust PDF download)
+                # Use Codeforces scraper as default (it has robust PDF download)
                 scraper = CodeforcesScraper()
                 logger.info(f"Unknown platform for {url}, using Codeforces scraper as fallback")
             
@@ -643,19 +648,86 @@ class PDFCreator:
             
             output_path = self.output_dir / output_filename
             
-            # Apply LLM optimization CSS if requested
-            enhanced_css = custom_css or ""
-            if llm_optimized:
-                llm_css = self._get_llm_optimization_css()
-                enhanced_css = f"{llm_css}\n{enhanced_css}" if enhanced_css else llm_css
-            
-            # Use the base scraper's webpage-to-PDF functionality
-            success = scraper.download_webpage_as_pdf(
-                url=url,
-                output_path=str(output_path),
-                use_selenium=use_selenium,
-                css_styles=enhanced_css
-            )
+            # If exact rendering is requested, use Chrome printToPDF for WYSIWYG
+            if exact_render:
+                success = scraper.download_webpage_as_pdf_chrome_exact(
+                    url=url,
+                    output_path=str(output_path)
+                )
+                if not success:
+                    raise PDFGenerationError(f"Failed exact rendering for: {url}")
+                logger.info(f"Successfully created exact-rendered PDF: {output_path}")
+                return str(output_path)
+
+            # Otherwise prefer platform-specific webpage-to-PDF with platform-tuned CSS
+            success = False
+
+            try:
+                if platform == "Codeforces":
+                    # Detect problem or blog/editorial
+                    if "/blog/entry/" in url_lower:
+                        success = scraper.download_editorial_as_pdf(
+                            url=url,
+                            output_path=str(output_path),
+                            use_selenium=use_selenium
+                        )
+                    else:
+                        success = scraper.download_problem_as_pdf(
+                            url=url,
+                            output_path=str(output_path),
+                            use_selenium=use_selenium
+                        )
+                elif platform == "AtCoder":
+                    # Detect editorial
+                    if "/editorial" in url_lower:
+                        success = scraper.download_editorial_as_pdf(
+                            url=url,
+                            output_path=str(output_path),
+                            use_selenium=use_selenium
+                        )
+                    else:
+                        success = scraper.download_problem_as_pdf(
+                            url=url,
+                            output_path=str(output_path),
+                            use_selenium=use_selenium
+                        )
+                elif platform == "SPOJ":
+                    # SPOJ has only problems; editorials are community posts
+                    success = scraper.download_problem_as_pdf(
+                        url=url,
+                        output_path=str(output_path),
+                        use_selenium=use_selenium
+                    )
+                elif platform == "CodeChef":
+                    # Detect discuss/editorial domain
+                    if "discuss.codechef.com" in url_lower:
+                        success = scraper.download_editorial_as_pdf(
+                            url=url,
+                            output_path=str(output_path),
+                            use_selenium=use_selenium
+                        )
+                    else:
+                        success = scraper.download_problem_as_pdf(
+                            url=url,
+                            output_path=str(output_path),
+                            use_selenium=use_selenium
+                        )
+            except Exception as e:
+                logger.debug(f"Platform-specific PDF generation failed, falling back to base for {platform}: {e}")
+
+            # If platform-specific path did not succeed, use base with LLM CSS
+            if not success:
+                enhanced_css = custom_css or ""
+                if llm_optimized:
+                    llm_css = self._get_llm_optimization_css()
+                    enhanced_css = f"{llm_css}\n{enhanced_css}" if enhanced_css else llm_css
+
+                success = scraper.download_webpage_as_pdf(
+                    url=url,
+                    output_path=str(output_path),
+                    use_selenium=use_selenium,
+                    css_styles=enhanced_css
+                )
             
             if not success:
                 raise PDFGenerationError(f"Failed to generate PDF from webpage: {url}")
